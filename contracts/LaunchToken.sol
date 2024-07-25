@@ -18,7 +18,7 @@ import { UD60x18, ud } from "@prb/math/src/UD60x18.sol";
 import { OApp, Origin, MessagingFee } from "@layerzerolabs/lz-evm-oapp-v2/contracts/oapp/OApp.sol";
 import { OptionsBuilder } from "@layerzerolabs/lz-evm-oapp-v2/contracts/oapp/libs/OptionsBuilder.sol";
 
-contract ArtistToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
+contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     using OptionsBuilder for bytes;
     using Address for address payable;
     using EnumerableMap for EnumerableMap.AddressToUintMap;
