@@ -36,7 +36,7 @@ const deploy = async (hre) => {
         from: deployer,
         args: [
             endpointV2Deployment.address, // LayerZero's EndpointV2 address
-            deployer, // owner
+            process.env.LAUNCHER_EID,
         ],
         log: true,
         skipIfAlreadyDeployed: false,

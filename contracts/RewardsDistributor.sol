@@ -3,11 +3,11 @@
 pragma solidity ^0.8.22;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { OApp, MessagingFee, Origin } from "@layerzerolabs/lz-evm-oapp-v2/contracts/oapp/OApp.sol";
 import { MessagingReceipt } from "@layerzerolabs/lz-evm-oapp-v2/contracts/oapp/OAppSender.sol";
 import { OAppReceiver, OAppCore } from "@layerzerolabs/lz-evm-oapp-v2/contracts/oapp/OAppReceiver.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { OptionsBuilder } from "@layerzerolabs/lz-evm-oapp-v2/contracts/oapp/libs/OptionsBuilder.sol";
 import { ILayerZeroEndpointV2 } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroEndpointV2.sol";
 
@@ -17,10 +17,24 @@ contract RewardsDistributor is OApp {
 
     uint32 public destEid;
 
-    constructor(address _endpoint, uint32) OApp(_endpoint, msg.sender) Ownable(msg.sender) {}
+    constructor(address _endpoint, uint32 _destEid) OApp(_endpoint, msg.sender) Ownable(msg.sender) {
+        destEid = _destEid;
+    }
+
+    function setDestEid(uint32 _destEid) public onlyOwner {
+        destEid = _destEid;
+    }
 
     EnumerableMap.AddressToUintMap private rewards;
     mapping(address => mapping(address => uint256)) private sponsors;
+
+    function getRewardTokens() public view returns (address[] memory) {
+        return rewards.keys();
+    }
+
+    function getRewards(address token) public view returns (uint256) {
+        return rewards.get(token);
+    }
 
     function buildSponsorMessage(address token, uint256 amount) public view returns (bytes memory) {
         return abi.encode(endpoint.eid(), token, amount);

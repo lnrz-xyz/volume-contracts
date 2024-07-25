@@ -35,8 +35,13 @@ const deploy = async (hre) => {
     const { address } = await deploy(contractName, {
         from: deployer,
         args: [
-            endpointV2Deployment.address, // LayerZero's EndpointV2 address
-            deployer, // owner
+            process.env.UNISWAP_FACTORY,
+            process.env.UNISWAP_ROUTER,
+            process.env.UNISWAP_POSITIONS,
+            process.env.WETH,
+            'ArtistToken',
+            'ART',
+            endpointV2Deployment.address,
         ],
         log: true,
         skipIfAlreadyDeployed: false,
