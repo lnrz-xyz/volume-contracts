@@ -1,18 +1,18 @@
-import assert from 'assert';
+import assert from 'assert'
 
 // TODO declare your contract name here
-const contractName = 'RewardsDistributor';
+const contractName = 'RewardsDistributor'
 
 const deploy = async (hre) => {
-    const { getNamedAccounts, deployments } = hre;
+    const { getNamedAccounts, deployments } = hre
 
-    const { deploy } = deployments;
-    const { deployer } = await getNamedAccounts();
+    const { deploy } = deployments
+    const { deployer } = await getNamedAccounts()
 
-    assert(deployer, 'Missing named deployer account');
+    assert(deployer, 'Missing named deployer account')
 
-    console.log(`Network: ${hre.network.name}`);
-    console.log(`Deployer: ${deployer}`);
+    console.log(`Network: ${hre.network.name}`)
+    console.log(`Deployer: ${deployer}`)
 
     // This is an external deployment pulled in from @layerzerolabs/lz-evm-sdk-v2
     //
@@ -30,7 +30,7 @@ const deploy = async (hre) => {
     //     eid: EndpointId.AVALANCHE_V2_TESTNET
     //   }
     // }
-    const endpointV2Deployment = await hre.deployments.get('EndpointV2');
+    const endpointV2Deployment = await hre.deployments.get('EndpointV2')
 
     const { address } = await deploy(contractName, {
         from: deployer,
@@ -40,11 +40,11 @@ const deploy = async (hre) => {
         ],
         log: true,
         skipIfAlreadyDeployed: false,
-    });
+    })
 
-    console.log(`Deployed contract: ${contractName}, network: ${hre.network.name}, address: ${address}`);
-};
+    console.log(`Deployed contract: ${contractName}, network: ${hre.network.name}, address: ${address}`)
+}
 
-deploy.tags = [contractName];
+deploy.tags = [contractName]
 
-export default deploy;
+export default deploy

@@ -8,7 +8,6 @@ import "@openzeppelin/contracts/utils/Context.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
@@ -34,6 +33,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     uint256 public constant LIQUIDITY_POOL_AMOUNT = 200_000_000 * 1e18;
 
     uint256 public constant creatorAmount = 10_000_000 * 1e18;
+    uint256 public constant burnAmount = 190_000_000 * 1e18;
     uint24 public constant poolFee = 10000;
     uint256 public buyFeePercent = 5;
     UD60x18 public maxSellFeePercent = ud(5);
@@ -150,6 +150,10 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
     function getRewards() public view returns (address[] memory) {
         return rewards.keys();
+    }
+
+    function getReward(address token) public view returns (uint256) {
+        return rewards.get(token);
     }
 
     function amountGreaterThanThreshold(uint256 amount) external pure returns (bool) {
@@ -284,6 +288,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
             INonfungiblePositionManager(uniswapPositionManager).mint{ value: liquidity }(params);
 
             _transfer(address(this), owner(), creatorAmount);
+            _burn(address(this), burnAmount);
             _transfer(address(this), pool, balanceOf(address(this)));
 
             // set the amount to whatever is extra than the threshold
