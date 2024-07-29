@@ -24,50 +24,69 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
     IERC20 public constant streamz = IERC20(0x499A12387357e3eC8FAcc011A2AB662e8aBdBd8f);
 
+    // total erc20 supply
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 1e18;
+    // the amount that will be tradeable before we pause the contract and create a uniswap pool
     uint256 public constant TRADEABLE_SUPPLY = 200_000_000 * 1e18;
-    uint256 public constant LIQUIDITY_VALUE = 4 ether;
 
+    // constant K for bonding curve calculation
     uint256 public constant K = (8 * 1e18) / (200000000 ** 2);
 
+    // the amount we match for liquidity when creating the pool
     uint256 public constant LIQUIDITY_POOL_AMOUNT = 200_000_000 * 1e18;
 
-    uint256 public constant creatorAmount = 10_000_000 * 1e18;
-    uint256 public constant burnAmount = 190_000_000 * 1e18;
-    uint24 public constant poolFee = 10000;
-    uint256 public buyFeePercent = 5;
-    UD60x18 public maxSellFeePercent = ud(5);
-    UD60x18 public noFeeProfitPercent = ud(5); // Profit at which no sell fee is charged
-    UD60x18 public fullFeeProfitPercent = ud(20);
+    // max creator amount
+    uint256 public constant CREATOR_MAX_BUY = 10_000_000 * 1e18;
+    // amount to burn after pool creation
+    uint256 public constant BURN_AMOUNT = 200_000_000 * 1e18;
+
+    // pool fee tier (1%)
+    uint24 public constant POOL_FEE = 10000;
+    // the fee percent for buying tokens
+    uint256 public buyFeePercent = 10;
+
+    // how much of the fees go to the protocol vs the creator
     uint256 public protocolFeePercent = 30;
     uint256 public creatorFeePercent = 70;
 
-    address private uniswapRouter;
-    address private uniswapFactory;
-    address private uniswapPositionManager;
-    address private WETH;
+    address private immutable uniswapRouter;
+    address private immutable uniswapFactory;
+    INonfungiblePositionManager private immutable uniswapPositionManager;
+    address private immutable WETH;
 
     event Buy(address indexed trader, uint256 newSupply, uint256 newBuyPrice, uint256 amount, uint256 ethAmount);
 
     event Sell(address indexed trader, uint256 newSupply, uint256 newBuyPrice, uint256 amount, uint256 ethAmount);
 
+    event CurveEnded(address indexed pool, uint128 liquidity, uint256 tokenId);
+
+    event RewardsClaimed(address indexed holder, address indexed token, uint256 amount, uint32 destination);
+
+    // holder -> amount
     EnumerableMap.AddressToUintMap private curveHoldings;
 
+    // token address -> amount
     EnumerableMap.AddressToUintMap private rewards;
+    // token address -> LayerZero endpoint id
     mapping(address => uint32) private rewardDestinations;
+    // holder -> token address -> claimed
     mapping(address => mapping(address => bool)) private rewardClaims;
+    // sponsor -> token address -> amount
     mapping(address => mapping(address => uint256)) private sponsors;
-
-    struct PurchaseData {
-        UD60x18 totalInvested;
-        UD60x18 totalTokensPurchased;
-    }
-
-    mapping(address => PurchaseData) public purchaseRecords;
 
     uint256 private volume;
 
-    uint256 private feesEarned; // TODO make internal
+    uint256 private feesEarned;
+
+    struct Deposit {
+        address owner;
+        uint128 liquidity;
+        address token0;
+        address token1;
+    }
+
+    // uniswap deposits
+    mapping(uint256 => Deposit) public deposits;
 
     constructor(
         address _swapRouter,
@@ -80,7 +99,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     ) Ownable(msg.sender) ERC20(name, symbol) ERC20Permit(name) OApp(endpoint, msg.sender) {
         uniswapRouter = _swapRouter;
         uniswapFactory = _factory;
-        uniswapPositionManager = _positions;
+        uniswapPositionManager = INonfungiblePositionManager(_positions);
         WETH = _weth;
         _mint(address(this), TOTAL_SUPPLY);
     }
@@ -93,21 +112,6 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     function setBuyFeePercent(uint256 _feePercent) public onlyProtocol {
         require(_feePercent <= 10, "Fee percent cannot exceed 10%");
         buyFeePercent = _feePercent;
-    }
-
-    function setMaxSellFeePercent(uint256 _feePercent) public onlyProtocol {
-        require(_feePercent <= 10, "Fee percent cannot exceed 10%");
-        maxSellFeePercent = ud(_feePercent);
-    }
-
-    function setNoFeeProfitPercent(uint256 _profitPercent) public onlyProtocol {
-        require(_profitPercent <= 100, "Profit percent cannot exceed 100%");
-        noFeeProfitPercent = ud(_profitPercent);
-    }
-
-    function setFullFeeProfitPercent(uint256 _profitPercent) public onlyProtocol {
-        require(_profitPercent <= 100, "Profit percent cannot exceed 100%");
-        fullFeeProfitPercent = ud(_profitPercent);
     }
 
     function setCreatorFeePercent(uint256 _feePercent) public onlyProtocol {
@@ -156,6 +160,10 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         return rewards.get(token);
     }
 
+    function getRewardIsClaimed(address holder, address token) public view returns (bool) {
+        return rewardClaims[holder][token];
+    }
+
     function amountGreaterThanThreshold(uint256 amount) external pure returns (bool) {
         return amount > TRADEABLE_SUPPLY;
     }
@@ -193,6 +201,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         return findTokenAmountForSell(eth, maxSlippage, lower, upper);
     }
 
+    // binary search to find the amount of tokens to sell for a given amount of eth
     function findTokenAmountForSell(
         uint256 receivedEther,
         uint256 maxSlippage,
@@ -230,6 +239,8 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
         return findTokenAmountForBuy(eth, maxSlippage, lower, upper);
     }
+
+    // binary search to find the amount of tokens to buy for a given amount of eth
     function findTokenAmountForBuy(
         uint256 paidEther,
         uint256 maxSlippage,
@@ -260,21 +271,27 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
     function buy(uint256 amount, uint256 maxSlippage) external payable whenNotPaused {
         require(amount > 0, "Amount must be greater than 0");
+        if (_msgSender() != owner()) {
+            require(balanceOf(_msgSender()) + amount <= CREATOR_MAX_BUY, "Amount exceeds max buy for creator");
+        }
 
         if (amount + getTokensHeldInCurve() >= TRADEABLE_SUPPLY) {
+            // curve ends here
+
             _pause();
 
-            address pool = IUniswapV3Factory(uniswapFactory).createPool(address(this), WETH, poolFee);
+            // create the pool
+            address pool = IUniswapV3Factory(uniswapFactory).createPool(address(this), WETH, POOL_FEE);
 
             // Approve the Nonfungible Position Manager to spend tokens
-            _approve(address(this), uniswapPositionManager, LIQUIDITY_POOL_AMOUNT);
+            _approve(address(this), address(uniswapPositionManager), LIQUIDITY_POOL_AMOUNT);
 
             uint256 liquidity = address(this).balance - feesEarned;
             // Add liquidity
             INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({
                 token0: address(this),
                 token1: WETH,
-                fee: poolFee,
+                fee: POOL_FEE,
                 tickLower: -887220,
                 tickUpper: 887220,
                 amount0Desired: LIQUIDITY_POOL_AMOUNT,
@@ -285,20 +302,27 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
                 deadline: block.timestamp
             });
 
-            INonfungiblePositionManager(uniswapPositionManager).mint{ value: liquidity }(params);
+            (uint256 tokenId, uint128 liquidityAdded, , uint256 amount1) = uniswapPositionManager.mint{
+                value: liquidity
+            }(params);
 
-            _transfer(address(this), owner(), creatorAmount);
-            _burn(address(this), burnAmount);
-            _transfer(address(this), pool, balanceOf(address(this)));
+            // if the amount1 (eth) is less than the liquidity, send the diff to the protocol
+            if (amount1 < liquidity) {
+                payable(protocol()).sendValue(liquidity - amount1);
+            }
 
-            // set the amount to whatever is extra than the threshold
-            amount = amount - (getTokensHeldInCurve() - TRADEABLE_SUPPLY);
+            _burn(address(this), BURN_AMOUNT);
+            _transfer(address(this), pool, balanceOf(address(this)) - amount);
+
+            emit CurveEnded(pool, liquidityAdded, tokenId);
+            // still finish this transaction
         }
 
         uint256 price = getBuyPrice(amount);
         uint256 fee = (price * buyFeePercent) / 100;
 
         if (msg.value >= price + fee) {
+            // refund the difference if they oversend
             uint256 refund = msg.value - price - fee;
             if (refund > 0) {
                 payable(_msgSender()).sendValue(refund);
@@ -306,6 +330,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
             _buy(amount, price, fee);
         } else {
+            // try to complete transaction anyway if they undersend, use slippage
             uint256 actualAmount = findTokenAmountForBuy(
                 msg.value - (msg.value * buyFeePercent) / 100,
                 maxSlippage,
@@ -329,22 +354,16 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         curveHoldings.set(_msgSender(), cur + amount);
 
         feesEarned += fee;
-        purchaseRecords[_msgSender()].totalInvested = purchaseRecords[_msgSender()].totalInvested.add(ud(price));
-        purchaseRecords[_msgSender()].totalTokensPurchased = purchaseRecords[_msgSender()].totalTokensPurchased.add(
-            ud(amount)
-        );
-        _transfer(address(this), _msgSender(), amount);
         volume += msg.value;
+
+        _transfer(address(this), _msgSender(), amount);
         emit Buy(_msgSender(), getTokensHeldInCurve(), getBuyPrice(1e18), amount, price);
     }
 
+    // maybe add slippage and desired sale price to sell, or a separate function for this
     function sell(uint256 amount) external whenNotPaused {
         require(amount > 0, "Amount must be greater than 0");
 
-        _sell(amount);
-    }
-
-    function _sell(uint256 amount) internal {
         uint256 balance = curveHoldings.get(_msgSender());
         require(balance >= amount, "Insufficient balance");
         if (balance - amount == 0) {
@@ -355,41 +374,16 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
         uint256 price = getSellPrice(amount);
 
-        console.log("Price for sell: %d", price);
-
-        PurchaseData storage data = purchaseRecords[_msgSender()];
-
-        UD60x18 averagePurchasePrice = data.totalInvested.div(data.totalTokensPurchased);
-
-        UD60x18 originalInvestmentValue = ud(amount).mul(averagePurchasePrice);
-
-        UD60x18 profitPercent = (ud(price).gt(originalInvestmentValue))
-            ? ((ud(price).sub(originalInvestmentValue)).mul(ud(100))).div(originalInvestmentValue)
-            : ud(0);
-
-        UD60x18 sellFeePercent;
-        if (profitPercent.lte(noFeeProfitPercent)) {
-            sellFeePercent = ud(0);
-        } else if (profitPercent.gte(fullFeeProfitPercent)) {
-            sellFeePercent = maxSellFeePercent;
-        } else {
-            sellFeePercent = ((profitPercent.sub(noFeeProfitPercent)).mul(maxSellFeePercent)).div(
-                (fullFeeProfitPercent.sub(noFeeProfitPercent))
-            );
-        }
-        uint256 fee = (ud(price).mul(sellFeePercent)).div(ud(100)).unwrap();
-
-        payable(_msgSender()).sendValue(price - fee);
+        payable(_msgSender()).sendValue(price);
 
         volume += price;
-
-        feesEarned += fee;
 
         _transfer(_msgSender(), address(this), amount);
 
         emit Sell(_msgSender(), getTokensHeldInCurve(), getBuyPrice(1e18), amount, price);
     }
 
+    // TODO remove
     function testWithdrawRemoveBeforeProd() public onlyOwner {
         payable(_msgSender()).sendValue(address(this).balance);
     }
@@ -397,16 +391,17 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     function claimFees() public onlyOwner {
         // protocol fee percent
         uint256 protocolFee = (feesEarned * protocolFeePercent) / 100;
-        feesEarned -= protocolFee;
-        protocol().sendValue(protocolFee);
-
         // creator fee percent
         uint256 creatorFee = (feesEarned * creatorFeePercent) / 100;
-        feesEarned -= creatorFee;
+
+        feesEarned -= creatorFee + protocolFee;
+
         payable(owner()).sendValue(creatorFee);
+        protocol().sendValue(protocolFee);
     }
 
-    function sponsor(address token, uint256 amount) public payable {
+    // sponsor rewards on the deployed chain of this contract
+    function sponsor(address token, uint256 amount) public payable whenNotPaused {
         require(IERC20(token).allowance(_msgSender(), address(this)) >= amount, "Allowance not set");
         IERC20(token).transferFrom(_msgSender(), address(this), amount);
         (, uint256 cur) = rewards.tryGet(token);
@@ -414,41 +409,49 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         sponsors[_msgSender()][token] += amount;
     }
 
-    function unsponsor(address token, uint256 amount) public payable {
+    // unsponsor rewards on the deployed chain of this contract
+    function unsponsor(address token) public payable whenNotPaused {
         uint256 cur = sponsors[_msgSender()][token];
-        require(cur >= amount, "Insufficient sponsorship");
-        sponsors[_msgSender()][token] -= amount;
-        rewards.set(token, rewards.get(token) - amount);
-        IERC20(token).transfer(_msgSender(), amount);
+        delete sponsors[_msgSender()][token];
+        rewards.set(token, rewards.get(token) - cur);
+        IERC20(token).transfer(_msgSender(), cur);
     }
 
+    // this is the message that will be sent to a rewards holdings contract on another chain
     function buildRewardsClaimMessage(address token, uint256 amount) public view returns (bytes memory) {
         return abi.encode(token, amount, _msgSender());
     }
 
+    // TODO what is a reasonable input for the executorGasLimit?
+    // this is the fee it will cost to send the cross chain message that should be sent along with any function that claims rewards
     function quoteRewardsClaim(address token, uint128 executorGasLimit) public view returns (MessagingFee memory fee) {
         uint256 curveHolding = curveHoldings.get(_msgSender());
         uint256 totalRewards = rewards.get(token);
         uint256 rewardAmount = (totalRewards * curveHolding) / getTokensHeldInCurve();
         bytes memory payload = buildRewardsClaimMessage(token, rewardAmount);
         uint32 destEid = rewardDestinations[token];
+        if (destEid == 0 || destEid == endpoint.eid()) {
+            return MessagingFee(0, 0);
+        }
         bytes memory options = OptionsBuilder.newOptions().addExecutorLzReceiveOption(executorGasLimit, 0);
         fee = _quote(destEid, payload, options, false);
     }
 
+    // claims rewards post game
     function claimRewards(address token, uint128 executorGasLimit) public payable whenPaused {
         require(!rewardClaims[_msgSender()][token], "Already claimed");
 
         uint256 curveHolding = curveHoldings.get(_msgSender());
-        bytes memory options = OptionsBuilder.newOptions().addExecutorLzReceiveOption(executorGasLimit, 0);
 
         uint256 totalRewards = rewards.get(token);
         uint256 rewardAmount = (totalRewards * curveHolding) / getTokensHeldInCurve();
-
         uint32 destEid = rewardDestinations[token];
+        // if the destination is the same chain, just transfer the rewards
+        // if the destination is an alternate chain, use layer zero to trigger the rewards claim
         if (destEid == 0 || destEid == endpoint.eid()) {
             IERC20(token).transfer(_msgSender(), rewardAmount);
         } else {
+            bytes memory options = OptionsBuilder.newOptions().addExecutorLzReceiveOption(executorGasLimit, 0);
             bytes memory message = buildRewardsClaimMessage(token, rewardAmount);
             _lzSend(destEid, message, options, MessagingFee(msg.value, 0), payable(msg.sender));
         }
@@ -492,8 +495,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         return super.transferFrom(sender, recipient, amount);
     }
 
-    //  abi.encode(endpoint.eid(), token, amount, _msgSender());
-
+    // this will be called when a reward is added on another chain and is used to update the rewards mapping to account for the rewards
     function _lzReceive(
         Origin calldata /*_origin*/,
         bytes32 /*_guid*/,

@@ -1,0 +1,643 @@
+diff --git a/contracts/base/BlockTimestamp.sol b/contracts/base/BlockTimestamp.sol
+index ac05cac0a562db4bad694d41519ff020013762de..6c802cad73f55eb5a64c34cd473fd689f171defa 100644
+--- a/contracts/base/BlockTimestamp.sol
++++ b/contracts/base/BlockTimestamp.sol
+@@ -1,5 +1,5 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+-pragma solidity =0.7.6;
++pragma solidity 0.8.21;
+ 
+ /// @title Function for getting block timestamp
+ /// @dev Base contract that is overridden for tests
+diff --git a/contracts/base/ERC721Permit.sol b/contracts/base/ERC721Permit.sol
+index efe0f544554d632e48213e80b51f90c3d11472b4..d6dd6c13774fb91c98d88b369dfc339a094f3d5c 100644
+--- a/contracts/base/ERC721Permit.sol
++++ b/contracts/base/ERC721Permit.sol
+@@ -1,19 +1,21 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+-pragma solidity =0.7.6;
++pragma solidity 0.8.21;
+ 
+-import '@openzeppelin/contracts/token/ERC721/ERC721.sol';
+-import '@openzeppelin/contracts/utils/Address.sol';
++import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
++import "@openzeppelin/contracts/utils/Address.sol";
+ 
+-import '../libraries/ChainId.sol';
+-import '../interfaces/external/IERC1271.sol';
+-import '../interfaces/IERC721Permit.sol';
+-import './BlockTimestamp.sol';
++import "../libraries/ChainId.sol";
++import "../interfaces/external/IERC1271.sol";
++import "../interfaces/IERC721Permit.sol";
++import "./BlockTimestamp.sol";
+ 
+ /// @title ERC721 with permit
+ /// @notice Nonfungible tokens that support an approve via signature, i.e. permit
+ abstract contract ERC721Permit is BlockTimestamp, ERC721, IERC721Permit {
+     /// @dev Gets the current nonce for a token ID and then increments it, returning the original value
+-    function _getAndIncrementNonce(uint256 tokenId) internal virtual returns (uint256);
++    function _getAndIncrementNonce(
++        uint256 tokenId
++    ) internal virtual returns (uint256);
+ 
+     /// @dev The hash of the name used in the permit signature verification
+     bytes32 private immutable nameHash;
+@@ -60,25 +62,38 @@ abstract contract ERC721Permit is BlockTimestamp, ERC721, IERC721Permit {
+         bytes32 r,
+         bytes32 s
+     ) external payable override {
+-        require(_blockTimestamp() <= deadline, 'Permit expired');
++        require(_blockTimestamp() <= deadline, "Permit expired");
+ 
+-        bytes32 digest =
+-            keccak256(
+-                abi.encodePacked(
+-                    '\x19\x01',
+-                    DOMAIN_SEPARATOR(),
+-                    keccak256(abi.encode(PERMIT_TYPEHASH, spender, tokenId, _getAndIncrementNonce(tokenId), deadline))
++        bytes32 digest = keccak256(
++            abi.encodePacked(
++                "\x19\x01",
++                DOMAIN_SEPARATOR(),
++                keccak256(
++                    abi.encode(
++                        PERMIT_TYPEHASH,
++                        spender,
++                        tokenId,
++                        _getAndIncrementNonce(tokenId),
++                        deadline
++                    )
+                 )
+-            );
++            )
++        );
+         address owner = ownerOf(tokenId);
+-        require(spender != owner, 'ERC721Permit: approval to current owner');
++        require(spender != owner, "ERC721Permit: approval to current owner");
+ 
+         if (Address.isContract(owner)) {
+-            require(IERC1271(owner).isValidSignature(digest, abi.encodePacked(r, s, v)) == 0x1626ba7e, 'Unauthorized');
++            require(
++                IERC1271(owner).isValidSignature(
++                    digest,
++                    abi.encodePacked(r, s, v)
++                ) == 0x1626ba7e,
++                "Unauthorized"
++            );
+         } else {
+             address recoveredAddress = ecrecover(digest, v, r, s);
+-            require(recoveredAddress != address(0), 'Invalid signature');
+-            require(recoveredAddress == owner, 'Unauthorized');
++            require(recoveredAddress != address(0), "Invalid signature");
++            require(recoveredAddress == owner, "Unauthorized");
+         }
+ 
+         _approve(spender, tokenId);
+diff --git a/contracts/base/LiquidityManagement.sol b/contracts/base/LiquidityManagement.sol
+index 0301b397ad79b4f8e86ff1a1db3dc6e267a0fe00..0960f7d44925d1e3f4f2c6f4cd6a0e649a203a39 100644
+--- a/contracts/base/LiquidityManagement.sol
++++ b/contracts/base/LiquidityManagement.sol
+@@ -1,21 +1,25 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+-pragma solidity =0.7.6;
++pragma solidity 0.8.21;
+ pragma abicoder v2;
+ 
+-import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol';
+-import '@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3MintCallback.sol';
+-import '@uniswap/v3-core/contracts/libraries/TickMath.sol';
++import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
++import "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3MintCallback.sol";
++import "@uniswap/v3-core/contracts/libraries/TickMath.sol";
+ 
+-import '../libraries/PoolAddress.sol';
+-import '../libraries/CallbackValidation.sol';
+-import '../libraries/LiquidityAmounts.sol';
++import "../libraries/PoolAddress.sol";
++import "../libraries/CallbackValidation.sol";
++import "../libraries/LiquidityAmounts.sol";
+ 
+-import './PeripheryPayments.sol';
+-import './PeripheryImmutableState.sol';
++import "./PeripheryPayments.sol";
++import "./PeripheryImmutableState.sol";
+ 
+ /// @title Liquidity management functions
+ /// @notice Internal functions for safely managing liquidity in Uniswap V3
+-abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmutableState, PeripheryPayments {
++abstract contract LiquidityManagement is
++    IUniswapV3MintCallback,
++    PeripheryImmutableState,
++    PeripheryPayments
++{
+     struct MintCallbackData {
+         PoolAddress.PoolKey poolKey;
+         address payer;
+@@ -30,8 +34,10 @@ abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmuta
+         MintCallbackData memory decoded = abi.decode(data, (MintCallbackData));
+         CallbackValidation.verifyCallback(factory, decoded.poolKey);
+ 
+-        if (amount0Owed > 0) pay(decoded.poolKey.token0, decoded.payer, msg.sender, amount0Owed);
+-        if (amount1Owed > 0) pay(decoded.poolKey.token1, decoded.payer, msg.sender, amount1Owed);
++        if (amount0Owed > 0)
++            pay(decoded.poolKey.token0, decoded.payer, msg.sender, amount0Owed);
++        if (amount1Owed > 0)
++            pay(decoded.poolKey.token1, decoded.payer, msg.sender, amount1Owed);
+     }
+ 
+     struct AddLiquidityParams {
+@@ -48,7 +54,9 @@ abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmuta
+     }
+ 
+     /// @notice Add liquidity to an initialized pool
+-    function addLiquidity(AddLiquidityParams memory params)
++    function addLiquidity(
++        AddLiquidityParams memory params
++    )
+         internal
+         returns (
+             uint128 liquidity,
+@@ -57,16 +65,23 @@ abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmuta
+             IUniswapV3Pool pool
+         )
+     {
+-        PoolAddress.PoolKey memory poolKey =
+-            PoolAddress.PoolKey({token0: params.token0, token1: params.token1, fee: params.fee});
++        PoolAddress.PoolKey memory poolKey = PoolAddress.PoolKey({
++            token0: params.token0,
++            token1: params.token1,
++            fee: params.fee
++        });
+ 
+         pool = IUniswapV3Pool(PoolAddress.computeAddress(factory, poolKey));
+ 
+         // compute the liquidity amount
+         {
+             (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+-            uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(params.tickLower);
+-            uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(params.tickUpper);
++            uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(
++                params.tickLower
++            );
++            uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(
++                params.tickUpper
++            );
+ 
+             liquidity = LiquidityAmounts.getLiquidityForAmounts(
+                 sqrtPriceX96,
+@@ -85,6 +100,9 @@ abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmuta
+             abi.encode(MintCallbackData({poolKey: poolKey, payer: msg.sender}))
+         );
+ 
+-        require(amount0 >= params.amount0Min && amount1 >= params.amount1Min, 'Price slippage check');
++        require(
++            amount0 >= params.amount0Min && amount1 >= params.amount1Min,
++            "Price slippage check"
++        );
+     }
+ }
+diff --git a/contracts/base/Multicall.sol b/contracts/base/Multicall.sol
+index 5a6384d301a0ea1f59339c2a6db111aff336fb4c..2bb3b181ad9b7e3603bdb7c40f8557b1379b39c5 100644
+--- a/contracts/base/Multicall.sol
++++ b/contracts/base/Multicall.sol
+@@ -1,17 +1,21 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+-pragma solidity =0.7.6;
++pragma solidity 0.8.21;
+ pragma abicoder v2;
+ 
+-import '../interfaces/IMulticall.sol';
++import "../interfaces/IMulticall.sol";
+ 
+ /// @title Multicall
+ /// @notice Enables calling multiple methods in a single call to the contract
+ abstract contract Multicall is IMulticall {
+     /// @inheritdoc IMulticall
+-    function multicall(bytes[] calldata data) public payable override returns (bytes[] memory results) {
++    function multicall(
++        bytes[] calldata data
++    ) public payable override returns (bytes[] memory results) {
+         results = new bytes[](data.length);
+         for (uint256 i = 0; i < data.length; i++) {
+-            (bool success, bytes memory result) = address(this).delegatecall(data[i]);
++            (bool success, bytes memory result) = address(this).delegatecall(
++                data[i]
++            );
+ 
+             if (!success) {
+                 // Next 5 lines from https://ethereum.stackexchange.com/a/83577
+diff --git a/contracts/base/PeripheryImmutableState.sol b/contracts/base/PeripheryImmutableState.sol
+index 75267a4dca90aea0d6bd0668d22763841d827884..8bb46ce2e7f295f74085b5101bde9518bbdad8c8 100644
+--- a/contracts/base/PeripheryImmutableState.sol
++++ b/contracts/base/PeripheryImmutableState.sol
+@@ -1,7 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+-pragma solidity =0.7.6;
++pragma solidity 0.8.21;
+ 
+-import '../interfaces/IPeripheryImmutableState.sol';
++import "../interfaces/IPeripheryImmutableState.sol";
+ 
+ /// @title Immutable state
+ /// @notice Immutable state used by periphery contracts
+diff --git a/contracts/base/PeripheryValidation.sol b/contracts/base/PeripheryValidation.sol
+index 40fadd7ed76696d508a471a626509530a9051feb..a4c4e3def3e477af4250142dedba3bdcb6e0d443 100644
+--- a/contracts/base/PeripheryValidation.sol
++++ b/contracts/base/PeripheryValidation.sol
+@@ -1,11 +1,11 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+-pragma solidity =0.7.6;
++pragma solidity 0.8.21;
+ 
+-import './BlockTimestamp.sol';
++import "./BlockTimestamp.sol";
+ 
+ abstract contract PeripheryValidation is BlockTimestamp {
+     modifier checkDeadline(uint256 deadline) {
+-        require(_blockTimestamp() <= deadline, 'Transaction too old');
++        require(_blockTimestamp() <= deadline, "Transaction too old");
+         _;
+     }
+ }
+diff --git a/contracts/base/PoolInitializer.sol b/contracts/base/PoolInitializer.sol
+index af8e43eebe0274c841247a73ae71ddbe54a78a75..928491c3181d2c188ff8f38e91a4b3f2821ec367 100644
+--- a/contracts/base/PoolInitializer.sol
++++ b/contracts/base/PoolInitializer.sol
+@@ -1,11 +1,11 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+-pragma solidity =0.7.6;
++pragma solidity 0.8.21;
+ 
+-import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol';
+-import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol';
++import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
++import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+ 
+-import './PeripheryImmutableState.sol';
+-import '../interfaces/IPoolInitializer.sol';
++import "./PeripheryImmutableState.sol";
++import "../interfaces/IPoolInitializer.sol";
+ 
+ /// @title Creates and initializes V3 Pools
+ abstract contract PoolInitializer is IPoolInitializer, PeripheryImmutableState {
+@@ -23,7 +23,8 @@ abstract contract PoolInitializer is IPoolInitializer, PeripheryImmutableState {
+             pool = IUniswapV3Factory(factory).createPool(token0, token1, fee);
+             IUniswapV3Pool(pool).initialize(sqrtPriceX96);
+         } else {
+-            (uint160 sqrtPriceX96Existing, , , , , , ) = IUniswapV3Pool(pool).slot0();
++            (uint160 sqrtPriceX96Existing, , , , , , ) = IUniswapV3Pool(pool)
++                .slot0();
+             if (sqrtPriceX96Existing == 0) {
+                 IUniswapV3Pool(pool).initialize(sqrtPriceX96);
+             }
+diff --git a/contracts/interfaces/external/IWETH9.sol b/contracts/interfaces/external/IWETH9.sol
+index 58ab43eb3b0d57ac904b1e4a9b56228e27aa3fe9..fafa4a047b2eebc8fb21c1ad97202dc0ad200489 100644
+--- a/contracts/interfaces/external/IWETH9.sol
++++ b/contracts/interfaces/external/IWETH9.sol
+@@ -1,7 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+-pragma solidity =0.7.6;
++pragma solidity 0.8.21;
+ 
+-import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
++import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+ 
+ /// @title Interface for WETH9
+ interface IWETH9 is IERC20 {
+diff --git a/contracts/libraries/CallbackValidation.sol b/contracts/libraries/CallbackValidation.sol
+index 788109f4d46fc1ca212f9b0714b35919b16cb6e4..598aea64c1af69ec596ac4f25690bde961d25665 100644
+--- a/contracts/libraries/CallbackValidation.sol
++++ b/contracts/libraries/CallbackValidation.sol
+@@ -1,8 +1,8 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+-pragma solidity =0.7.6;
++pragma solidity 0.8.21;
+ 
+-import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol';
+-import './PoolAddress.sol';
++import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
++import "./PoolAddress.sol";
+ 
+ /// @notice Provides validation for callbacks from Uniswap V3 Pools
+ library CallbackValidation {
+@@ -18,18 +18,21 @@ library CallbackValidation {
+         address tokenB,
+         uint24 fee
+     ) internal view returns (IUniswapV3Pool pool) {
+-        return verifyCallback(factory, PoolAddress.getPoolKey(tokenA, tokenB, fee));
++        return
++            verifyCallback(
++                factory,
++                PoolAddress.getPoolKey(tokenA, tokenB, fee)
++            );
+     }
+ 
+     /// @notice Returns the address of a valid Uniswap V3 Pool
+     /// @param factory The contract address of the Uniswap V3 factory
+     /// @param poolKey The identifying key of the V3 pool
+     /// @return pool The V3 pool contract address
+-    function verifyCallback(address factory, PoolAddress.PoolKey memory poolKey)
+-        internal
+-        view
+-        returns (IUniswapV3Pool pool)
+-    {
++    function verifyCallback(
++        address factory,
++        PoolAddress.PoolKey memory poolKey
++    ) internal view returns (IUniswapV3Pool pool) {
+         pool = IUniswapV3Pool(PoolAddress.computeAddress(factory, poolKey));
+         require(msg.sender == address(pool));
+     }
+diff --git a/contracts/libraries/HexStrings.sol b/contracts/libraries/HexStrings.sol
+index 8f82288095fa9fa6f4a4a990b88c9600f42510d9..2b5a73c577db017772d00bdb35473eb613a1448e 100644
+--- a/contracts/libraries/HexStrings.sol
++++ b/contracts/libraries/HexStrings.sol
+@@ -1,24 +1,30 @@
+ // SPDX-License-Identifier: MIT
+-pragma solidity =0.7.6;
++pragma solidity 0.8.21;
+ 
+ library HexStrings {
+-    bytes16 internal constant ALPHABET = '0123456789abcdef';
++    bytes16 internal constant ALPHABET = "0123456789abcdef";
+ 
+     /// @notice Converts a `uint256` to its ASCII `string` hexadecimal representation with fixed length.
+     /// @dev Credit to Open Zeppelin under MIT license https://github.com/OpenZeppelin/openzeppelin-contracts/blob/243adff49ce1700e0ecb99fe522fb16cff1d1ddc/contracts/utils/Strings.sol#L55
+-    function toHexString(uint256 value, uint256 length) internal pure returns (string memory) {
++    function toHexString(
++        uint256 value,
++        uint256 length
++    ) internal pure returns (string memory) {
+         bytes memory buffer = new bytes(2 * length + 2);
+-        buffer[0] = '0';
+-        buffer[1] = 'x';
++        buffer[0] = "0";
++        buffer[1] = "x";
+         for (uint256 i = 2 * length + 1; i > 1; --i) {
+             buffer[i] = ALPHABET[value & 0xf];
+             value >>= 4;
+         }
+-        require(value == 0, 'Strings: hex length insufficient');
++        require(value == 0, "Strings: hex length insufficient");
+         return string(buffer);
+     }
+ 
+-    function toHexStringNoPrefix(uint256 value, uint256 length) internal pure returns (string memory) {
++    function toHexStringNoPrefix(
++        uint256 value,
++        uint256 length
++    ) internal pure returns (string memory) {
+         bytes memory buffer = new bytes(2 * length);
+         for (uint256 i = buffer.length; i > 0; i--) {
+             buffer[i - 1] = ALPHABET[value & 0xf];
+diff --git a/contracts/libraries/OracleLibrary.sol b/contracts/libraries/OracleLibrary.sol
+index ddb82be610e5694581de1553fe86f4ca3da82e55..d64fbea4f62d7aa52c15c08593421b6144053074 100644
+--- a/contracts/libraries/OracleLibrary.sol
++++ b/contracts/libraries/OracleLibrary.sol
+@@ -1,9 +1,9 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+-pragma solidity >=0.5.0 <0.8.0;
++pragma solidity >=0.5.0;
+ 
+-import '@uniswap/v3-core/contracts/libraries/FullMath.sol';
+-import '@uniswap/v3-core/contracts/libraries/TickMath.sol';
+-import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol';
++import "@uniswap/v3-core/contracts/libraries/FullMath.sol";
++import "@uniswap/v3-core/contracts/libraries/TickMath.sol";
++import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+ 
+ /// @title Oracle library
+ /// @notice Provides functions to integrate with V3 pool oracle
+@@ -13,31 +13,42 @@ library OracleLibrary {
+     /// @param secondsAgo Number of seconds in the past from which to calculate the time-weighted means
+     /// @return arithmeticMeanTick The arithmetic mean tick from (block.timestamp - secondsAgo) to block.timestamp
+     /// @return harmonicMeanLiquidity The harmonic mean liquidity from (block.timestamp - secondsAgo) to block.timestamp
+-    function consult(address pool, uint32 secondsAgo)
++    function consult(
++        address pool,
++        uint32 secondsAgo
++    )
+         internal
+         view
+         returns (int24 arithmeticMeanTick, uint128 harmonicMeanLiquidity)
+     {
+-        require(secondsAgo != 0, 'BP');
++        require(secondsAgo != 0, "BP");
+ 
+         uint32[] memory secondsAgos = new uint32[](2);
+         secondsAgos[0] = secondsAgo;
+         secondsAgos[1] = 0;
+ 
+-        (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s) =
+-            IUniswapV3Pool(pool).observe(secondsAgos);
++        (
++            int56[] memory tickCumulatives,
++            uint160[] memory secondsPerLiquidityCumulativeX128s
++        ) = IUniswapV3Pool(pool).observe(secondsAgos);
+ 
+         int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
+-        uint160 secondsPerLiquidityCumulativesDelta =
+-            secondsPerLiquidityCumulativeX128s[1] - secondsPerLiquidityCumulativeX128s[0];
++        uint160 secondsPerLiquidityCumulativesDelta = secondsPerLiquidityCumulativeX128s[
++                1
++            ] - secondsPerLiquidityCumulativeX128s[0];
+ 
+         arithmeticMeanTick = int24(tickCumulativesDelta / secondsAgo);
+         // Always round to negative infinity
+-        if (tickCumulativesDelta < 0 && (tickCumulativesDelta % secondsAgo != 0)) arithmeticMeanTick--;
++        if (
++            tickCumulativesDelta < 0 && (tickCumulativesDelta % secondsAgo != 0)
++        ) arithmeticMeanTick--;
+ 
+         // We are multiplying here instead of shifting to ensure that harmonicMeanLiquidity doesn't overflow uint128
+         uint192 secondsAgoX160 = uint192(secondsAgo) * type(uint160).max;
+-        harmonicMeanLiquidity = uint128(secondsAgoX160 / (uint192(secondsPerLiquidityCumulativesDelta) << 32));
++        harmonicMeanLiquidity = uint128(
++            secondsAgoX160 /
++                (uint192(secondsPerLiquidityCumulativesDelta) << 32)
++        );
+     }
+ 
+     /// @notice Given a tick and a token amount, calculates the amount of token received in exchange
+@@ -61,7 +72,11 @@ library OracleLibrary {
+                 ? FullMath.mulDiv(ratioX192, baseAmount, 1 << 192)
+                 : FullMath.mulDiv(1 << 192, baseAmount, ratioX192);
+         } else {
+-            uint256 ratioX128 = FullMath.mulDiv(sqrtRatioX96, sqrtRatioX96, 1 << 64);
++            uint256 ratioX128 = FullMath.mulDiv(
++                sqrtRatioX96,
++                sqrtRatioX96,
++                1 << 64
++            );
+             quoteAmount = baseToken < quoteToken
+                 ? FullMath.mulDiv(ratioX128, baseAmount, 1 << 128)
+                 : FullMath.mulDiv(1 << 128, baseAmount, ratioX128);
+@@ -71,12 +86,23 @@ library OracleLibrary {
+     /// @notice Given a pool, it returns the number of seconds ago of the oldest stored observation
+     /// @param pool Address of Uniswap V3 pool that we want to observe
+     /// @return secondsAgo The number of seconds ago of the oldest observation stored for the pool
+-    function getOldestObservationSecondsAgo(address pool) internal view returns (uint32 secondsAgo) {
+-        (, , uint16 observationIndex, uint16 observationCardinality, , , ) = IUniswapV3Pool(pool).slot0();
+-        require(observationCardinality > 0, 'NI');
++    function getOldestObservationSecondsAgo(
++        address pool
++    ) internal view returns (uint32 secondsAgo) {
++        (
++            ,
++            ,
++            uint16 observationIndex,
++            uint16 observationCardinality,
++            ,
++            ,
++
++        ) = IUniswapV3Pool(pool).slot0();
++        require(observationCardinality > 0, "NI");
+ 
+-        (uint32 observationTimestamp, , , bool initialized) =
+-            IUniswapV3Pool(pool).observations((observationIndex + 1) % observationCardinality);
++        (uint32 observationTimestamp, , , bool initialized) = IUniswapV3Pool(
++            pool
++        ).observations((observationIndex + 1) % observationCardinality);
+ 
+         // The next index might not be initialized if the cardinality is in the process of increasing
+         // In this case the oldest observation is always in index 0
+@@ -90,22 +116,38 @@ library OracleLibrary {
+     /// @notice Given a pool, it returns the tick value as of the start of the current block
+     /// @param pool Address of Uniswap V3 pool
+     /// @return The tick that the pool was in at the start of the current block
+-    function getBlockStartingTickAndLiquidity(address pool) internal view returns (int24, uint128) {
+-        (, int24 tick, uint16 observationIndex, uint16 observationCardinality, , , ) = IUniswapV3Pool(pool).slot0();
++    function getBlockStartingTickAndLiquidity(
++        address pool
++    ) internal view returns (int24, uint128) {
++        (
++            ,
++            int24 tick,
++            uint16 observationIndex,
++            uint16 observationCardinality,
++            ,
++            ,
++
++        ) = IUniswapV3Pool(pool).slot0();
+ 
+         // 2 observations are needed to reliably calculate the block starting tick
+-        require(observationCardinality > 1, 'NEO');
++        require(observationCardinality > 1, "NEO");
+ 
+         // If the latest observation occurred in the past, then no tick-changing trades have happened in this block
+         // therefore the tick in `slot0` is the same as at the beginning of the current block.
+         // We don't need to check if this observation is initialized - it is guaranteed to be.
+-        (uint32 observationTimestamp, int56 tickCumulative, uint160 secondsPerLiquidityCumulativeX128, ) =
+-            IUniswapV3Pool(pool).observations(observationIndex);
++        (
++            uint32 observationTimestamp,
++            int56 tickCumulative,
++            uint160 secondsPerLiquidityCumulativeX128,
++
++        ) = IUniswapV3Pool(pool).observations(observationIndex);
+         if (observationTimestamp != uint32(block.timestamp)) {
+             return (tick, IUniswapV3Pool(pool).liquidity());
+         }
+ 
+-        uint256 prevIndex = (uint256(observationIndex) + observationCardinality - 1) % observationCardinality;
++        uint256 prevIndex = (uint256(observationIndex) +
++            observationCardinality -
++            1) % observationCardinality;
+         (
+             uint32 prevObservationTimestamp,
+             int56 prevTickCumulative,
+@@ -113,15 +155,17 @@ library OracleLibrary {
+             bool prevInitialized
+         ) = IUniswapV3Pool(pool).observations(prevIndex);
+ 
+-        require(prevInitialized, 'ONI');
++        require(prevInitialized, "ONI");
+ 
+         uint32 delta = observationTimestamp - prevObservationTimestamp;
+         tick = int24((tickCumulative - prevTickCumulative) / delta);
+-        uint128 liquidity =
+-            uint128(
+-                (uint192(delta) * type(uint160).max) /
+-                    (uint192(secondsPerLiquidityCumulativeX128 - prevSecondsPerLiquidityCumulativeX128) << 32)
+-            );
++        uint128 liquidity = uint128(
++            (uint192(delta) * type(uint160).max) /
++                (uint192(
++                    secondsPerLiquidityCumulativeX128 -
++                        prevSecondsPerLiquidityCumulativeX128
++                ) << 32)
++        );
+         return (tick, liquidity);
+     }
+ 
+@@ -137,11 +181,9 @@ library OracleLibrary {
+     /// @dev Each entry of `weightedTickData` should represents ticks from pools with the same underlying pool tokens. If they do not,
+     /// extreme care must be taken to ensure that ticks are comparable (including decimal differences).
+     /// @dev Note that the weighted arithmetic mean tick corresponds to the weighted geometric mean price.
+-    function getWeightedArithmeticMeanTick(WeightedTickData[] memory weightedTickData)
+-        internal
+-        pure
+-        returns (int24 weightedArithmeticMeanTick)
+-    {
++    function getWeightedArithmeticMeanTick(
++        WeightedTickData[] memory weightedTickData
++    ) internal pure returns (int24 weightedArithmeticMeanTick) {
+         // Accumulates the sum of products between each tick and its weight
+         int256 numerator;
+ 
+@@ -150,13 +192,16 @@ library OracleLibrary {
+ 
+         // Products fit in 152 bits, so it would take an array of length ~2**104 to overflow this logic
+         for (uint256 i; i < weightedTickData.length; i++) {
+-            numerator += weightedTickData[i].tick * int256(weightedTickData[i].weight);
++            numerator +=
++                weightedTickData[i].tick *
++                int256(weightedTickData[i].weight);
+             denominator += weightedTickData[i].weight;
+         }
+ 
+         weightedArithmeticMeanTick = int24(numerator / int256(denominator));
+         // Always round to negative infinity
+-        if (numerator < 0 && (numerator % int256(denominator) != 0)) weightedArithmeticMeanTick--;
++        if (numerator < 0 && (numerator % int256(denominator) != 0))
++            weightedArithmeticMeanTick--;
+     }
+ 
+     /// @notice Returns the "synthetic" tick which represents the price of the first entry in `tokens` in terms of the last
+@@ -165,16 +210,17 @@ library OracleLibrary {
+     /// @param tokens The token contract addresses
+     /// @param ticks The ticks, representing the price of each token pair in `tokens`
+     /// @return syntheticTick The synthetic tick, representing the relative price of the outermost tokens in `tokens`
+-    function getChainedPrice(address[] memory tokens, int24[] memory ticks)
+-        internal
+-        pure
+-        returns (int256 syntheticTick)
+-    {
+-        require(tokens.length - 1 == ticks.length, 'DL');
++    function getChainedPrice(
++        address[] memory tokens,
++        int24[] memory ticks
++    ) internal pure returns (int256 syntheticTick) {
++        require(tokens.length - 1 == ticks.length, "DL");
+         for (uint256 i = 1; i <= ticks.length; i++) {
+             // check the tokens for address sort order, then accumulate the
+             // ticks into the running synthetic tick, ensuring that intermediate tokens "cancel out"
+-            tokens[i - 1] < tokens[i] ? syntheticTick += ticks[i - 1] : syntheticTick -= ticks[i - 1];
++            tokens[i - 1] < tokens[i]
++                ? syntheticTick += ticks[i - 1]
++                : syntheticTick -= ticks[i - 1];
+         }
+     }
+ }
+diff --git a/contracts/libraries/TokenRatioSortOrder.sol b/contracts/libraries/TokenRatioSortOrder.sol
+index d9a2c9e80c445d645a78d7d485a21f83098e53ad..1e14360e224880e43c34c39ee6bc45a4bc15d72b 100644
+--- a/contracts/libraries/TokenRatioSortOrder.sol
++++ b/contracts/libraries/TokenRatioSortOrder.sol
+@@ -1,5 +1,5 @@
+ // SPDX-License-Identifier: MIT
+-pragma solidity =0.7.6;
++pragma solidity 0.8.21;
+ 
+ library TokenRatioSortOrder {
+     int256 constant NUMERATOR_MOST = 300;

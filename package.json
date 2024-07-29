@@ -1,11 +1,11 @@
 {
-  "name": "@layerzerolabs/oapp-example",
-  "version": "0.2.10",
+  "name": "launch",
+  "version": "1.0.0.",
   "private": true,
   "license": "MIT",
   "scripts": {
     "clean": "rm -rf artifacts cache out",
-    "compile": "$npm_execpath run compile:forge && $npm_execpath run compile:hardhat",
+    "compile": "$npm_execpath run compile:hardhat",
     "compile:forge": "forge build",
     "compile:hardhat": "hardhat compile",
     "lint": "$npm_execpath run lint:js && $npm_execpath run lint:sol",
@@ -20,6 +20,11 @@
     "@nomicfoundation/edr": "0.3.5",
     "ethers": "^5.7.2",
     "hardhat-deploy": "^0.12.1"
+  },
+  "dependencies": {
+    "@prb/math": "^4.0.3",
+    "@uniswap/v3-core": "^1.0.1",
+    "@uniswap/v3-periphery": "^1.4.4"
   },
   "devDependencies": {
     "@babel/core": "^7.23.9",
@@ -57,6 +62,7 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   },
+  "packageManager": "yarn@4.3.1",
   "engines": {
     "node": ">=18.16.0"
   },
@@ -71,11 +77,5 @@
     "@nomicfoundation/edr": "0.3.5",
     "ethers": "^5.7.2",
     "hardhat-deploy": "^0.12.1"
-  },
-  "dependencies": {
-    "@prb/math": "^4.0.3",
-    "@uniswap/v3-core": "^1.0.1",
-    "@uniswap/v3-periphery": "^1.4.4"
-  },
-  "packageManager": "yarn@4.3.1"
+  }
 }
