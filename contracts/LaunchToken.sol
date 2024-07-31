@@ -63,6 +63,8 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     event RewardsClaimed(address indexed holder, address indexed token, uint256 amount, uint32 destination);
 
     // holder -> amount
+    // we use this instead of IERC20.balanceOf to ensure at the end of the curve we have a snapshot state of all holders
+    // we also can use the enumerability to count holders easily off-chain
     EnumerableMap.AddressToUintMap private curveHoldings;
 
     // token address -> amount
@@ -78,16 +80,6 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
     uint256 private feesEarned;
 
-    struct Deposit {
-        address owner;
-        uint128 liquidity;
-        address token0;
-        address token1;
-    }
-
-    // uniswap deposits
-    mapping(uint256 => Deposit) public deposits;
-
     constructor(
         address _swapRouter,
         address _factory,
@@ -96,7 +88,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         string memory name,
         string memory symbol,
         address endpoint
-    ) Ownable(msg.sender) ERC20(name, symbol) ERC20Permit(name) OApp(endpoint, msg.sender) {
+    ) Ownable(msg.sender) ERC20(name, symbol) ERC20Permit(name) OApp(endpoint, protocol()) {
         uniswapRouter = _swapRouter;
         uniswapFactory = _factory;
         uniswapPositionManager = INonfungiblePositionManager(_positions);
@@ -193,6 +185,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     function getAmountByETHSell(uint256 eth, uint256 maxSlippage) external view returns (uint256) {
         uint256 lower = 0;
         uint256 upper = getTokensHeldInCurve();
+        // initial range estimation
         while (getSellPrice(upper) < eth) {
             lower = upper - (upper / 10);
             upper *= 2;
@@ -277,7 +270,6 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
         if (amount + getTokensHeldInCurve() >= TRADEABLE_SUPPLY) {
             // curve ends here
-
             _pause();
 
             // create the pool
@@ -389,19 +381,33 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     }
 
     function claimFees() public onlyOwner {
-        // protocol fee percent
-        uint256 protocolFee = (feesEarned * protocolFeePercent) / 100;
-        // creator fee percent
-        uint256 creatorFee = (feesEarned * creatorFeePercent) / 100;
+        if (paused()) {
+            // if the contract is paused, the curve is ended and all value in the contract is fees
 
-        feesEarned -= creatorFee + protocolFee;
+            // protocol fee percent
+            uint256 protocolFee = (address(this).balance * protocolFeePercent) / 100;
+            // creator fee percent
+            uint256 creatorFee = (address(this).balance * creatorFeePercent) / 100;
 
-        payable(owner()).sendValue(creatorFee);
-        protocol().sendValue(protocolFee);
+            feesEarned = 0;
+
+            payable(owner()).sendValue(creatorFee);
+            protocol().sendValue(protocolFee);
+        } else {
+            // protocol fee percent
+            uint256 protocolFee = (feesEarned * protocolFeePercent) / 100;
+            // creator fee percent
+            uint256 creatorFee = (feesEarned * creatorFeePercent) / 100;
+
+            feesEarned -= creatorFee + protocolFee;
+
+            payable(owner()).sendValue(creatorFee);
+            protocol().sendValue(protocolFee);
+        }
     }
 
     // sponsor rewards on the deployed chain of this contract
-    function sponsor(address token, uint256 amount) public payable whenNotPaused {
+    function sponsor(address token, uint256 amount) public whenNotPaused {
         require(IERC20(token).allowance(_msgSender(), address(this)) >= amount, "Allowance not set");
         IERC20(token).transferFrom(_msgSender(), address(this), amount);
         (, uint256 cur) = rewards.tryGet(token);
@@ -410,7 +416,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     }
 
     // unsponsor rewards on the deployed chain of this contract
-    function unsponsor(address token) public payable whenNotPaused {
+    function unsponsor(address token) public whenNotPaused {
         uint256 cur = sponsors[_msgSender()][token];
         delete sponsors[_msgSender()][token];
         rewards.set(token, rewards.get(token) - cur);
