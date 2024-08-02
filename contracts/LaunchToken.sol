@@ -27,7 +27,8 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     // total erc20 supply
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 1e18;
     // the amount that will be tradeable before we pause the contract and create a uniswap pool
-    uint256 public constant TRADEABLE_SUPPLY = 200_000_000 * 1e18;
+    // uint256 public constant TRADEABLE_SUPPLY = 200_000_000 * 1e18;
+    uint256 public constant TRADEABLE_SUPPLY = 2_000_000 * 1e18;
 
     // constant K for bonding curve calculation
     uint256 public constant K = (8 * 1e18) / (200000000 ** 2);
@@ -88,7 +89,12 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         string memory name,
         string memory symbol,
         address endpoint
-    ) Ownable(msg.sender) ERC20(name, symbol) ERC20Permit(name) OApp(endpoint, protocol()) {
+    )
+        Ownable(msg.sender)
+        ERC20(name, symbol)
+        ERC20Permit(name)
+        OApp(endpoint, 0x49D4de8Fc7fD8FceEf03AA5b7b191189bFbB637b)
+    {
         uniswapRouter = _swapRouter;
         uniswapFactory = _factory;
         uniswapPositionManager = INonfungiblePositionManager(_positions);
@@ -264,7 +270,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
     function buy(uint256 amount, uint256 maxSlippage) external payable whenNotPaused {
         require(amount > 0, "Amount must be greater than 0");
-        if (_msgSender() != owner()) {
+        if (_msgSender() == owner()) {
             require(balanceOf(_msgSender()) + amount <= CREATOR_MAX_BUY, "Amount exceeds max buy for creator");
         }
 
@@ -272,41 +278,41 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
             // curve ends here
             _pause();
 
-            // create the pool
-            address pool = IUniswapV3Factory(uniswapFactory).createPool(address(this), WETH, POOL_FEE);
+            // // create the pool
+            // address pool = IUniswapV3Factory(uniswapFactory).createPool(address(this), WETH, POOL_FEE);
 
-            // Approve the Nonfungible Position Manager to spend tokens
-            _approve(address(this), address(uniswapPositionManager), LIQUIDITY_POOL_AMOUNT);
+            // // Approve the Nonfungible Position Manager to spend tokens
+            // _approve(address(this), address(uniswapPositionManager), LIQUIDITY_POOL_AMOUNT);
 
-            uint256 liquidity = address(this).balance - feesEarned;
-            // Add liquidity
-            INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({
-                token0: address(this),
-                token1: WETH,
-                fee: POOL_FEE,
-                tickLower: -887220,
-                tickUpper: 887220,
-                amount0Desired: LIQUIDITY_POOL_AMOUNT,
-                amount1Desired: liquidity,
-                amount0Min: 0,
-                amount1Min: 0,
-                recipient: protocol(),
-                deadline: block.timestamp
-            });
+            // uint256 liquidity = address(this).balance - feesEarned;
+            // // Add liquidity
+            // INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({
+            //     token0: address(this),
+            //     token1: WETH,
+            //     fee: POOL_FEE,
+            //     tickLower: -887220,
+            //     tickUpper: 887220,
+            //     amount0Desired: LIQUIDITY_POOL_AMOUNT,
+            //     amount1Desired: liquidity,
+            //     amount0Min: 0,
+            //     amount1Min: 0,
+            //     recipient: protocol(),
+            //     deadline: block.timestamp
+            // });
 
-            (uint256 tokenId, uint128 liquidityAdded, , uint256 amount1) = uniswapPositionManager.mint{
-                value: liquidity
-            }(params);
+            // (uint256 tokenId, uint128 liquidityAdded, , uint256 amount1) = uniswapPositionManager.mint{
+            //     value: liquidity
+            // }(params);
 
-            // if the amount1 (eth) is less than the liquidity, send the diff to the protocol
-            if (amount1 < liquidity) {
-                payable(protocol()).sendValue(liquidity - amount1);
-            }
+            // // if the amount1 (eth) is less than the liquidity, send the diff to the protocol
+            // if (amount1 < liquidity) {
+            //     payable(protocol()).sendValue(liquidity - amount1);
+            // }
 
             _burn(address(this), BURN_AMOUNT);
-            _transfer(address(this), pool, balanceOf(address(this)) - amount);
+            // _transfer(address(this), pool, balanceOf(address(this)) - amount);
 
-            emit CurveEnded(pool, liquidityAdded, tokenId);
+            // emit CurveEnded(pool, liquidityAdded, tokenId);
             // still finish this transaction
         }
 
