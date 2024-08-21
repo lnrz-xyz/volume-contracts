@@ -32,11 +32,13 @@ const deploy = async (hre) => {
     // }
     const endpointV2Deployment = await hre.deployments.get('EndpointV2')
 
+    console.log(
+        `Deploying contract: ${contractName} with uniswap factory: ${process.env.UNISWAP_FACTORY}, positions: ${process.env.UNISWAP_POSITIONS}, weth: ${process.env.WETH}, endpointV2: ${endpointV2Deployment.address}`
+    )
     const { address } = await deploy(contractName, {
         from: deployer,
         args: [
             process.env.UNISWAP_FACTORY,
-            process.env.UNISWAP_ROUTER,
             process.env.UNISWAP_POSITIONS,
             process.env.WETH,
             'LaunchV1Test',

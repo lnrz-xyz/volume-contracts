@@ -10,8 +10,12 @@ import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
+import "./FullMath.sol";
+import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+import "./IWETH9.sol";
 import "./INonfungiblePositionManager.sol";
+import "./TickMath.sol";
 import "hardhat/console.sol";
 import { UD60x18, ud } from "@prb/math/src/UD60x18.sol";
 import { OApp, Origin, MessagingFee } from "@layerzerolabs/lz-evm-oapp-v2/contracts/oapp/OApp.sol";
@@ -22,13 +26,13 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     using Address for address payable;
     using EnumerableMap for EnumerableMap.AddressToUintMap;
 
-    IERC20 public constant streamz = IERC20(0x499A12387357e3eC8FAcc011A2AB662e8aBdBd8f);
+    // IERC20 public constant streamz = IERC20(0x499A12387357e3eC8FAcc011A2AB662e8aBdBd8f);
 
     // total erc20 supply
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 1e18;
     // the amount that will be tradeable before we pause the contract and create a uniswap pool
     // uint256 public constant TRADEABLE_SUPPLY = 200_000_000 * 1e18;
-    uint256 public constant TRADEABLE_SUPPLY = 2_000_000 * 1e18;
+    uint256 public constant TRADEABLE_SUPPLY = 20_000_000 * 1e18;
 
     // constant K for bonding curve calculation
     uint256 public constant K = (8 * 1e18) / (200000000 ** 2);
@@ -37,7 +41,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     uint256 public constant LIQUIDITY_POOL_AMOUNT = 200_000_000 * 1e18;
 
     // max creator amount
-    uint256 public constant CREATOR_MAX_BUY = 10_000_000 * 1e18;
+    uint256 public constant CREATOR_MAX_BUY = 10000_000_000 * 1e18;
     // amount to burn after pool creation
     uint256 public constant BURN_AMOUNT = 200_000_000 * 1e18;
 
@@ -50,10 +54,9 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     uint256 public protocolFeePercent = 30;
     uint256 public creatorFeePercent = 70;
 
-    address private immutable uniswapRouter;
-    address private immutable uniswapFactory;
+    IUniswapV3Factory private immutable uniswapFactory;
     INonfungiblePositionManager private immutable uniswapPositionManager;
-    address private immutable WETH;
+    IWETH9 private immutable WETH;
 
     event Buy(address indexed trader, uint256 newSupply, uint256 newBuyPrice, uint256 amount, uint256 ethAmount);
 
@@ -82,7 +85,6 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     uint256 private feesEarned;
 
     constructor(
-        address _swapRouter,
         address _factory,
         address _positions,
         address _weth,
@@ -95,11 +97,16 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         ERC20Permit(name)
         OApp(endpoint, 0x49D4de8Fc7fD8FceEf03AA5b7b191189bFbB637b)
     {
-        uniswapRouter = _swapRouter;
-        uniswapFactory = _factory;
+        uniswapFactory = IUniswapV3Factory(_factory);
         uniswapPositionManager = INonfungiblePositionManager(_positions);
-        WETH = _weth;
+        WETH = IWETH9(_weth);
+        IERC20(address(WETH)).approve(address(_factory), type(uint256).max);
+
         _mint(address(this), TOTAL_SUPPLY);
+    }
+
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes memory) external {
+        // IERC20(WETH).transfer(msg.sender, amount0Delta > amount1Delta ? uint256(amount0Delta) : uint256(amount1Delta));
     }
 
     modifier onlyProtocol() {
@@ -268,52 +275,11 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         return lower;
     }
 
+    event Test(uint256 one, uint256 two, uint256 three, uint256 four);
     function buy(uint256 amount, uint256 maxSlippage) external payable whenNotPaused {
         require(amount > 0, "Amount must be greater than 0");
         if (_msgSender() == owner()) {
             require(balanceOf(_msgSender()) + amount <= CREATOR_MAX_BUY, "Amount exceeds max buy for creator");
-        }
-
-        if (amount + getTokensHeldInCurve() >= TRADEABLE_SUPPLY) {
-            // curve ends here
-            _pause();
-
-            // // create the pool
-            // address pool = IUniswapV3Factory(uniswapFactory).createPool(address(this), WETH, POOL_FEE);
-
-            // // Approve the Nonfungible Position Manager to spend tokens
-            // _approve(address(this), address(uniswapPositionManager), LIQUIDITY_POOL_AMOUNT);
-
-            // uint256 liquidity = address(this).balance - feesEarned;
-            // // Add liquidity
-            // INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({
-            //     token0: address(this),
-            //     token1: WETH,
-            //     fee: POOL_FEE,
-            //     tickLower: -887220,
-            //     tickUpper: 887220,
-            //     amount0Desired: LIQUIDITY_POOL_AMOUNT,
-            //     amount1Desired: liquidity,
-            //     amount0Min: 0,
-            //     amount1Min: 0,
-            //     recipient: protocol(),
-            //     deadline: block.timestamp
-            // });
-
-            // (uint256 tokenId, uint128 liquidityAdded, , uint256 amount1) = uniswapPositionManager.mint{
-            //     value: liquidity
-            // }(params);
-
-            // // if the amount1 (eth) is less than the liquidity, send the diff to the protocol
-            // if (amount1 < liquidity) {
-            //     payable(protocol()).sendValue(liquidity - amount1);
-            // }
-
-            _burn(address(this), BURN_AMOUNT);
-            // _transfer(address(this), pool, balanceOf(address(this)) - amount);
-
-            // emit CurveEnded(pool, liquidityAdded, tokenId);
-            // still finish this transaction
         }
 
         uint256 price = getBuyPrice(amount);
@@ -345,6 +311,71 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
             _buy(actualAmount, price, fee);
         }
+
+        if (amount + getTokensHeldInCurve() >= TRADEABLE_SUPPLY) {
+            // curve ends here
+            _pause();
+
+            address pool = IUniswapV3Factory(uniswapFactory).getPool(address(this), address(WETH), POOL_FEE);
+            if (pool == address(0)) {
+                pool = IUniswapV3Factory(uniswapFactory).createPool(address(this), address(WETH), POOL_FEE);
+            }
+            require(pool != address(0), "Pool does not exist");
+
+            // uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(1);
+            uint160 sqrtPriceX96 = uint160((sqrt(1) * 2) ** 96);
+            IUniswapV3Pool(pool).initialize(sqrtPriceX96);
+
+            emit Test(address(this).balance, uint256(sqrtPriceX96), 0, 0);
+
+            uint256 liquidity = address(this).balance - feesEarned;
+
+            emit Test(liquidity, sqrtPriceX96, 0, address(this).balance);
+
+            IWETH9(WETH).deposit{ value: liquidity }();
+
+            // Approve the Nonfungible Position Manager to spend tokens
+            IERC20(address(this)).approve(address(uniswapPositionManager), LIQUIDITY_POOL_AMOUNT);
+            IERC20(address(WETH)).approve(address(uniswapPositionManager), liquidity);
+
+            (address token0, address token1) = address(this) < address(WETH)
+                ? (address(this), address(WETH))
+                : (address(WETH), address(this));
+            (uint256 tk0AmountToMint, uint256 tk1AmountToMint) = (address(this) == token0)
+                ? (LIQUIDITY_POOL_AMOUNT, liquidity)
+                : (liquidity, LIQUIDITY_POOL_AMOUNT);
+
+            (uint256 amount0min, uint256 amount1min) = (address(this) == token0)
+                ? (uint256(0), liquidity)
+                : (liquidity, uint256(0));
+
+            (uint256 tokenId, uint128 liquidityAdded, , ) = uniswapPositionManager.mint(
+                INonfungiblePositionManager.MintParams({
+                    token0: token0,
+                    token1: token1,
+                    fee: POOL_FEE,
+                    tickLower: -887200,
+                    tickUpper: 887200,
+                    amount0Desired: tk0AmountToMint,
+                    amount1Desired: tk1AmountToMint,
+                    amount0Min: amount0min,
+                    amount1Min: amount1min,
+                    recipient: protocol(),
+                    deadline: block.timestamp + 1000
+                })
+            );
+
+            _burn(address(this), BURN_AMOUNT);
+            _transfer(address(this), pool, balanceOf(address(this))); // ????
+
+            emit CurveEnded(pool, liquidityAdded, tokenId);
+        }
+    }
+
+    function calculateSqrtPriceX96(uint256 priceToken1InToken0) public pure returns (uint160) {
+        // priceToken1InToken0 is the price of token1 in terms of token0, scaled up by 1e18
+        uint256 sqrtPriceX96 = sqrt(priceToken1InToken0) * 2 ** 96;
+        return uint160(sqrtPriceX96);
     }
 
     function _buy(uint256 amount, uint256 price, uint256 fee) internal {
@@ -471,7 +502,8 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     }
 
     function protocol() public view returns (address payable) {
-        return payable(Ownable(address(streamz)).owner());
+        // return payable(Ownable(address(streamz)).owner());
+        return payable(0x49D4de8Fc7fD8FceEf03AA5b7b191189bFbB637b);
     }
 
     // override transfer and transferFrom to modify curveHoldings
@@ -518,5 +550,18 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         (uint32 destEid, address token, uint256 amount) = abi.decode(payload, (uint32, address, uint256));
         rewards.set(token, amount);
         rewardDestinations[token] = destEid;
+    }
+
+    function sqrt(uint256 y) internal pure returns (uint256 z) {
+        if (y > 3) {
+            z = y;
+            uint256 x = y / 2 + 1;
+            while (x < z) {
+                z = x;
+                x = (y / x + x) / 2;
+            }
+        } else if (y != 0) {
+            z = 1;
+        }
     }
 }

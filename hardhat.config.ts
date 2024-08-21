@@ -62,6 +62,11 @@ const config: HardhatUserConfig = {
             url: process.env.RPC_URL_ZORA_TESTNET,
             accounts,
         },
+        testnet: {
+            eid: EndpointId.SEPOLIA_V2_TESTNET,
+            url: process.env.RPC_URL_TESTNET,
+            accounts,
+        },
     },
     namedAccounts: {
         deployer: {
