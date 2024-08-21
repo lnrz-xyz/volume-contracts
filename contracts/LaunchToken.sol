@@ -26,7 +26,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     using Address for address payable;
     using EnumerableMap for EnumerableMap.AddressToUintMap;
 
-    // IERC20 public constant streamz = IERC20(0x499A12387357e3eC8FAcc011A2AB662e8aBdBd8f);
+    address payable private protocol = payable(0x49D4de8Fc7fD8FceEf03AA5b7b191189bFbB637b);
 
     // total erc20 supply
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 1e18;
@@ -110,8 +110,12 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     }
 
     modifier onlyProtocol() {
-        require(msg.sender == protocol(), "Not the protocol");
+        require(msg.sender == protocol, "Not the protocol");
         _;
+    }
+
+    function setProtocol(address payable protocol_) public onlyProtocol {
+        protocol = protocol_;
     }
 
     function setBuyFeePercent(uint256 _feePercent) public onlyProtocol {
@@ -149,7 +153,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         return volume;
     }
 
-    function pause() external onlyOwner {
+    function pause() external onlyProtocol {
         _pause();
     }
 
@@ -360,7 +364,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
                     amount1Desired: tk1AmountToMint,
                     amount0Min: amount0min,
                     amount1Min: amount1min,
-                    recipient: protocol(),
+                    recipient: protocol,
                     deadline: block.timestamp + 1000
                 })
             );
@@ -429,7 +433,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
             feesEarned = 0;
 
             payable(owner()).sendValue(creatorFee);
-            protocol().sendValue(protocolFee);
+            protocol.sendValue(protocolFee);
         } else {
             // protocol fee percent
             uint256 protocolFee = (feesEarned * protocolFeePercent) / 100;
@@ -439,7 +443,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
             feesEarned -= creatorFee + protocolFee;
 
             payable(owner()).sendValue(creatorFee);
-            protocol().sendValue(protocolFee);
+            protocol.sendValue(protocolFee);
         }
     }
 
@@ -499,11 +503,6 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
             _lzSend(destEid, message, options, MessagingFee(msg.value, 0), payable(msg.sender));
         }
         rewardClaims[_msgSender()][token] = true;
-    }
-
-    function protocol() public view returns (address payable) {
-        // return payable(Ownable(address(streamz)).owner());
-        return payable(0x49D4de8Fc7fD8FceEf03AA5b7b191189bFbB637b);
     }
 
     // override transfer and transferFrom to modify curveHoldings
