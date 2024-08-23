@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.21;
+pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -17,6 +17,8 @@ import "./IWETH9.sol";
 import "./INonfungiblePositionManager.sol";
 import "hardhat/console.sol";
 import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
+import "splits-v2/splitters/SplitFactoryV2.sol";
+import {SplitV2Lib} from "splits-v2/libraries/SplitV2.sol";
 
 contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
     using Address for address payable;
@@ -57,6 +59,7 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
     IUniswapV3Factory private immutable uniswapFactory;
     INonfungiblePositionManager private immutable uniswapPositionManager;
     IWETH9 private immutable WETH;
+    SplitFactoryV2 private immutable splitFactory;
 
     event Buy(
         address indexed trader,
@@ -111,6 +114,7 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
         address _factory,
         address _positions,
         address _weth,
+        address _splitFactory,
         string memory name,
         string memory symbol
     ) payable Ownable(msg.sender) ERC20(name, symbol) ERC20Permit(name) {
@@ -118,6 +122,7 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
         uniswapFactory = IUniswapV3Factory(_factory);
         uniswapPositionManager = INonfungiblePositionManager(_positions);
         WETH = IWETH9(_weth);
+        splitFactory = SplitFactoryV2(_splitFactory);
         IERC20(address(WETH)).approve(address(_factory), type(uint256).max);
 
         _mint(address(this), TOTAL_SUPPLY);
@@ -429,7 +434,7 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
                         amount1Desired: tk1AmountToMint,
                         amount0Min: amount0min,
                         amount1Min: amount1min,
-                        recipient: protocol,
+                        recipient: address(this),
                         deadline: block.timestamp + 1000
                     })
                 );
@@ -437,8 +442,45 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
             _burn(address(this), BURN_AMOUNT);
             _transfer(address(this), pool, balanceOf(address(this))); // ????
 
+            splitFactory.createSplit(createSplitData(), protocol, owner());
+
             emit CurveEnded(pool, liquidityAdded, tokenId);
         }
+    }
+
+    function createSplitData() public pure returns (SplitV2Lib.Split memory) {
+        // the protocol and owner get 20 percent
+        // the top 10 holders split the other 80 percent
+        address[] memory recipients = new address[](12);
+        uint256[] memory allocations = new uint256[](12);
+        uint256 totalAllocation = 0;
+        uint256 distributionIncentive = 0;
+
+        // protocol
+        recipients[0] = protocol;
+        allocations[0] = 10;
+        totalAllocation += 10;
+
+        // owner
+        recipients[1] = owner();
+        allocations[1] = 10;
+        totalAllocation += 10;
+
+        // top holders
+
+        for (uint8 i = 0; i < 10; i++) {
+            recipients[i + 2] = address(0);
+            allocations[i + 2] = 8;
+            totalAllocation += 8;
+        }
+
+        return
+            SplitV2Lib.Split({
+                recipients: recipients,
+                allocations: allocations,
+                totalAllocation: totalAllocation,
+                distributionIncentive: distributionIncentive
+            });
     }
 
     function calculateSqrtPriceX96(

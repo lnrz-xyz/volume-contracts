@@ -1,18 +1,10 @@
 [profile.default]
-solc-version = '0.8.22'
+solc-version = '0.8.23'
 src = 'contracts'
 out = 'out'
 test = 'test/foundry'
 cache_path = 'cache/foundry'
-libs = [
-    # We provide a set of useful contract utilities
-    # in the lib directory of @layerzerolabs/toolbox-foundry:
-    # 
-    # - forge-std
-    # - ds-test
-    # - solidity-bytes-utils
-    'node_modules',
-]
+libs = ["node_modules", "lib"]
 
 remappings = [
     # Due to a misconfiguration of solidity-bytes-utils, an outdated version
@@ -20,4 +12,5 @@ remappings = [
     # 
     # To remedy this, we'll remap the ds-test and forge-std imports to ou own versions
     '@openzeppelin/=node_modules/@openzeppelin/',
+    'splits-v2/=lib/splits-contracts-monorepo/packages/splits-v2/src',
 ]

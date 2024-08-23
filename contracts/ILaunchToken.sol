@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.21;
+pragma solidity ^0.8.23;
 
 interface ILaunchToken {
     function name() external view returns (string memory);
@@ -7,8 +7,15 @@ interface ILaunchToken {
     function decimals() external view returns (uint8);
     function totalSupply() external view returns (uint256);
     function balanceOf(address _owner) external view returns (uint256 balance);
-    function transfer(address _to, uint256 _value) external returns (bool success);
-    function transferFrom(address _from, address _to, uint256 _value) external returns (bool success);
+    function transfer(
+        address _to,
+        uint256 _value
+    ) external returns (bool success);
+    function transferFrom(
+        address _from,
+        address _to,
+        uint256 _value
+    ) external returns (bool success);
 
     function getCurveBalance(address holder) external view returns (uint256);
 
@@ -18,7 +25,10 @@ interface ILaunchToken {
 
     function getCurveHoldersLength() external view returns (uint256);
 
-    function getPrice(uint256 supply, uint256 amount) external view returns (uint256);
+    function getPrice(
+        uint256 supply,
+        uint256 amount
+    ) external view returns (uint256);
 
     function getBuyPrice(uint256 amount) external view returns (uint256);
 
