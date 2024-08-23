@@ -519,14 +519,15 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, IERC721Receiver {
 
     // market stats -------------------------------------
 
-    // TODO make it take streamz
     function purchaseMarketStats() external payable {
         require(!boughtMarketStats[_msgSender()], "Already purchased");
         boughtMarketStats[_msgSender()] = true;
 
+        // TODO remove before prod (take eth in the mean time)
         require(msg.value == marketStatsPrice, "Insufficient payment");
         marketPurchaseValue += msg.value;
 
+        // TODO uncomment before prod
         // STREAMZ.transferFrom(_msgSender(), address(this), marketStatsPrice);
     }
 
@@ -547,10 +548,10 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, IERC721Receiver {
         payable(owner()).sendValue(creatorFee);
         protocol.sendValue(protocolFee);
 
-        // TODO uncomment before prod
         uint256 claimedMarketPurchaseValue = marketPurchaseValue;
         marketPurchaseValue = 0;
-        protocol.sendValue(marketPurchaseValue); // TODO remove!!
+        protocol.sendValue(marketPurchaseValue); // TODO remove before prod
+        // TODO uncomment before prod
         // STREAMZ.transfer(owner(), (marketPurchaseValue * creatorFeePercent) / 100);
         // STREAMZ.transfer(protocol, STREAMZ.balanceOf(address(this)));
 
@@ -744,7 +745,7 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, IERC721Receiver {
         _pause();
     }
 
-    // TODO remove
+    // TODO remove before prod
     function testWithdrawRemoveBeforeProd() public onlyProtocol {
         payable(_msgSender()).sendValue(address(this).balance);
     }
