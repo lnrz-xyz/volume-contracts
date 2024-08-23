@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.22;
+
 /// @title Interface for WETH9
 interface IWETH9 {
     /// @notice Deposit ether to get wrapped ether

@@ -27,15 +27,13 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     using EnumerableMap for EnumerableMap.AddressToUintMap;
 
     address payable private protocol = payable(0x49D4de8Fc7fD8FceEf03AA5b7b191189bFbB637b);
+    IERC20 private constant STREAMZ = IERC20(0x499A12387357e3eC8FAcc011A2AB662e8aBdBd8f);
 
     // total erc20 supply
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 1e18;
-    // the amount that will be tradeable before we pause the contract and create a uniswap pool
-    // uint256 public constant TRADEABLE_SUPPLY = 200_000_000 * 1e18;
-    uint256 public constant TRADEABLE_SUPPLY = 20_000_000 * 1e18;
 
     // constant K for bonding curve calculation
-    uint256 public constant K = (8 * 1e18) / (200000000 ** 2);
+    uint256 public constant K = (4 * 1e18) / (200_000_000 ** 2);
 
     // the amount we match for liquidity when creating the pool
     uint256 public constant LIQUIDITY_POOL_AMOUNT = 200_000_000 * 1e18;
@@ -44,6 +42,10 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     uint256 public constant CREATOR_MAX_BUY = 10000_000_000 * 1e18;
     // amount to burn after pool creation
     uint256 public constant BURN_AMOUNT = 200_000_000 * 1e18;
+
+    uint256 public constant LIQUIDITY_POOL_VOLUME_THRESHOLD = 1 ether;
+
+    uint256 public marketStatsPrice = 40000;
 
     // pool fee tier (1%)
     uint24 public constant POOL_FEE = 10000;
@@ -80,9 +82,12 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     // sponsor -> token address -> amount
     mapping(address => mapping(address => uint256)) private sponsors;
 
+    mapping(address => bool) private boughtMarketStats;
+
     uint256 private volume;
 
     uint256 private feesEarned;
+    uint256 marketPurchaseValue;
 
     constructor(
         address _factory,
@@ -106,6 +111,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     }
 
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes memory) external {
+        // TODO test with this uncommented
         // IERC20(WETH).transfer(msg.sender, amount0Delta > amount1Delta ? uint256(amount0Delta) : uint256(amount1Delta));
     }
 
@@ -146,7 +152,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     }
 
     function getThreshold() public pure returns (uint256) {
-        return TRADEABLE_SUPPLY;
+        return LIQUIDITY_POOL_VOLUME_THRESHOLD;
     }
 
     function getVolume() public view returns (uint256) {
@@ -171,10 +177,6 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
     function getRewardIsClaimed(address holder, address token) public view returns (bool) {
         return rewardClaims[holder][token];
-    }
-
-    function amountGreaterThanThreshold(uint256 amount) external pure returns (bool) {
-        return amount > TRADEABLE_SUPPLY;
     }
 
     function getBuyPrice(uint256 amount) public view returns (uint256) {
@@ -279,7 +281,6 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         return lower;
     }
 
-    event Test(uint256 one, uint256 two, uint256 three, uint256 four);
     function buy(uint256 amount, uint256 maxSlippage) external payable whenNotPaused {
         require(amount > 0, "Amount must be greater than 0");
         if (_msgSender() == owner()) {
@@ -316,7 +317,8 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
             _buy(actualAmount, price, fee);
         }
 
-        if (amount + getTokensHeldInCurve() >= TRADEABLE_SUPPLY) {
+        // if (amount + getTokensHeldInCurve() >= TRADEABLE_SUPPLY) {
+        if (volume >= LIQUIDITY_POOL_VOLUME_THRESHOLD) {
             // curve ends here
             _pause();
 
@@ -330,24 +332,22 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
             uint160 sqrtPriceX96 = uint160((sqrt(1) * 2) ** 96);
             IUniswapV3Pool(pool).initialize(sqrtPriceX96);
 
-            emit Test(address(this).balance, uint256(sqrtPriceX96), 0, 0);
-
             uint256 liquidity = address(this).balance - feesEarned;
-
-            emit Test(liquidity, sqrtPriceX96, 0, address(this).balance);
 
             IWETH9(WETH).deposit{ value: liquidity }();
 
+            uint256 activeSupply = TOTAL_SUPPLY - balanceOf(address(this));
+
             // Approve the Nonfungible Position Manager to spend tokens
-            IERC20(address(this)).approve(address(uniswapPositionManager), LIQUIDITY_POOL_AMOUNT);
+            IERC20(address(this)).approve(address(uniswapPositionManager), activeSupply);
             IERC20(address(WETH)).approve(address(uniswapPositionManager), liquidity);
 
             (address token0, address token1) = address(this) < address(WETH)
                 ? (address(this), address(WETH))
                 : (address(WETH), address(this));
             (uint256 tk0AmountToMint, uint256 tk1AmountToMint) = (address(this) == token0)
-                ? (LIQUIDITY_POOL_AMOUNT, liquidity)
-                : (liquidity, LIQUIDITY_POOL_AMOUNT);
+                ? (activeSupply, liquidity)
+                : (liquidity, activeSupply);
 
             (uint256 amount0min, uint256 amount1min) = (address(this) == token0)
                 ? (uint256(0), liquidity)
@@ -386,6 +386,7 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         (, uint256 cur) = curveHoldings.tryGet(_msgSender());
         curveHoldings.set(_msgSender(), cur + amount);
 
+        // TODO do fees earned or just transfer to protocol and creator?
         feesEarned += fee;
         volume += msg.value;
 
@@ -416,93 +417,42 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         emit Sell(_msgSender(), getTokensHeldInCurve(), getBuyPrice(1e18), amount, price);
     }
 
+    // TODO make it take streamz
+    function purchaseMarketStats() external payable {
+        require(!boughtMarketStats[_msgSender()], "Already purchased");
+        boughtMarketStats[_msgSender()] = true;
+
+        require(msg.value == marketStatsPrice, "Insufficient payment");
+        marketPurchaseValue += msg.value;
+
+        // STREAMZ.transferFrom(_msgSender(), address(this), marketStatsPrice);
+    }
+
+    function purchasedMarketStats(address holder) public view returns (bool) {
+        return boughtMarketStats[holder];
+    }
+
     // TODO remove
     function testWithdrawRemoveBeforeProd() public onlyOwner {
         payable(_msgSender()).sendValue(address(this).balance);
     }
 
     function claimFees() public onlyOwner {
-        if (paused()) {
-            // if the contract is paused, the curve is ended and all value in the contract is fees
+        // protocol fee percent
+        uint256 protocolFee = (feesEarned * protocolFeePercent) / 100;
+        // creator fee percent
+        uint256 creatorFee = (feesEarned * creatorFeePercent) / 100;
 
-            // protocol fee percent
-            uint256 protocolFee = (address(this).balance * protocolFeePercent) / 100;
-            // creator fee percent
-            uint256 creatorFee = (address(this).balance * creatorFeePercent) / 100;
+        feesEarned -= creatorFee + protocolFee;
 
-            feesEarned = 0;
+        payable(owner()).sendValue(creatorFee);
+        protocol.sendValue(protocolFee);
 
-            payable(owner()).sendValue(creatorFee);
-            protocol.sendValue(protocolFee);
-        } else {
-            // protocol fee percent
-            uint256 protocolFee = (feesEarned * protocolFeePercent) / 100;
-            // creator fee percent
-            uint256 creatorFee = (feesEarned * creatorFeePercent) / 100;
-
-            feesEarned -= creatorFee + protocolFee;
-
-            payable(owner()).sendValue(creatorFee);
-            protocol.sendValue(protocolFee);
-        }
-    }
-
-    // sponsor rewards on the deployed chain of this contract
-    function sponsor(address token, uint256 amount) public whenNotPaused {
-        require(IERC20(token).allowance(_msgSender(), address(this)) >= amount, "Allowance not set");
-        IERC20(token).transferFrom(_msgSender(), address(this), amount);
-        (, uint256 cur) = rewards.tryGet(token);
-        rewards.set(token, cur + amount);
-        sponsors[_msgSender()][token] += amount;
-    }
-
-    // unsponsor rewards on the deployed chain of this contract
-    function unsponsor(address token) public whenNotPaused {
-        uint256 cur = sponsors[_msgSender()][token];
-        delete sponsors[_msgSender()][token];
-        rewards.set(token, rewards.get(token) - cur);
-        IERC20(token).transfer(_msgSender(), cur);
-    }
-
-    // this is the message that will be sent to a rewards holdings contract on another chain
-    function buildRewardsClaimMessage(address token, uint256 amount) public view returns (bytes memory) {
-        return abi.encode(token, amount, _msgSender());
-    }
-
-    // TODO what is a reasonable input for the executorGasLimit?
-    // this is the fee it will cost to send the cross chain message that should be sent along with any function that claims rewards
-    function quoteRewardsClaim(address token, uint128 executorGasLimit) public view returns (MessagingFee memory fee) {
-        uint256 curveHolding = curveHoldings.get(_msgSender());
-        uint256 totalRewards = rewards.get(token);
-        uint256 rewardAmount = (totalRewards * curveHolding) / getTokensHeldInCurve();
-        bytes memory payload = buildRewardsClaimMessage(token, rewardAmount);
-        uint32 destEid = rewardDestinations[token];
-        if (destEid == 0 || destEid == endpoint.eid()) {
-            return MessagingFee(0, 0);
-        }
-        bytes memory options = OptionsBuilder.newOptions().addExecutorLzReceiveOption(executorGasLimit, 0);
-        fee = _quote(destEid, payload, options, false);
-    }
-
-    // claims rewards post game
-    function claimRewards(address token, uint128 executorGasLimit) public payable whenPaused {
-        require(!rewardClaims[_msgSender()][token], "Already claimed");
-
-        uint256 curveHolding = curveHoldings.get(_msgSender());
-
-        uint256 totalRewards = rewards.get(token);
-        uint256 rewardAmount = (totalRewards * curveHolding) / getTokensHeldInCurve();
-        uint32 destEid = rewardDestinations[token];
-        // if the destination is the same chain, just transfer the rewards
-        // if the destination is an alternate chain, use layer zero to trigger the rewards claim
-        if (destEid == 0 || destEid == endpoint.eid()) {
-            IERC20(token).transfer(_msgSender(), rewardAmount);
-        } else {
-            bytes memory options = OptionsBuilder.newOptions().addExecutorLzReceiveOption(executorGasLimit, 0);
-            bytes memory message = buildRewardsClaimMessage(token, rewardAmount);
-            _lzSend(destEid, message, options, MessagingFee(msg.value, 0), payable(msg.sender));
-        }
-        rewardClaims[_msgSender()][token] = true;
+        // TODO uncomment before prod
+        marketPurchaseValue = 0;
+        payable(protocol).sendValue(marketPurchaseValue); // TODO remove!!
+        // STREAMZ.transfer(owner(), (marketPurchaseValue * creatorFeePercent) / 100);
+        // STREAMZ.transfer(protocol, STREAMZ.balanceOf(address(this)));
     }
 
     // override transfer and transferFrom to modify curveHoldings
