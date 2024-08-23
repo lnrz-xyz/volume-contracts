@@ -15,13 +15,12 @@ import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "./IWETH9.sol";
 import "./INonfungiblePositionManager.sol";
-import "./TickMath.sol";
 import "hardhat/console.sol";
 import { UD60x18, ud } from "@prb/math/src/UD60x18.sol";
 import { OApp, Origin, MessagingFee } from "@layerzerolabs/lz-evm-oapp-v2/contracts/oapp/OApp.sol";
 import { OptionsBuilder } from "@layerzerolabs/lz-evm-oapp-v2/contracts/oapp/libs/OptionsBuilder.sol";
 
-contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
+contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     using OptionsBuilder for bytes;
     using Address for address payable;
     using EnumerableMap for EnumerableMap.AddressToUintMap;
@@ -97,11 +96,13 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         string memory symbol,
         address endpoint
     )
+        payable
         Ownable(msg.sender)
         ERC20(name, symbol)
         ERC20Permit(name)
         OApp(endpoint, 0x49D4de8Fc7fD8FceEf03AA5b7b191189bFbB637b)
     {
+        require(msg.value == 0.001 ether, "Incorrect deployment fee");
         uniswapFactory = IUniswapV3Factory(_factory);
         uniswapPositionManager = INonfungiblePositionManager(_positions);
         WETH = IWETH9(_weth);
@@ -328,7 +329,6 @@ contract LaunchToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
             }
             require(pool != address(0), "Pool does not exist");
 
-            // uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(1);
             uint160 sqrtPriceX96 = uint160((sqrt(1) * 2) ** 96);
             IUniswapV3Pool(pool).initialize(sqrtPriceX96);
 

@@ -8,10 +8,7 @@ import 'dotenv/config'
 import 'hardhat-deploy'
 import 'hardhat-contract-sizer'
 import '@nomiclabs/hardhat-ethers'
-import '@layerzerolabs/toolbox-hardhat'
 import { HardhatUserConfig, HttpNetworkAccountsUserConfig } from 'hardhat/types'
-
-import { EndpointId } from '@layerzerolabs/lz-definitions'
 
 // Set your preferred authentication method
 //
@@ -53,17 +50,14 @@ const config: HardhatUserConfig = {
     },
     networks: {
         'base-testnet': {
-            eid: EndpointId.BASESEP_V2_TESTNET,
             url: process.env.RPC_URL_BASE_TESTNET,
             accounts,
         },
         'zora-testnet': {
-            eid: EndpointId.ZORASEP_V2_TESTNET,
             url: process.env.RPC_URL_ZORA_TESTNET,
             accounts,
         },
         testnet: {
-            eid: EndpointId.SEPOLIA_V2_TESTNET,
             url: process.env.RPC_URL_TESTNET,
             accounts,
         },
