@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.23;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -17,8 +17,7 @@ import "./IWETH9.sol";
 import "./INonfungiblePositionManager.sol";
 import "hardhat/console.sol";
 import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
-import "splits-v2/splitters/SplitFactoryV2.sol";
-import {SplitV2Lib} from "splits-v2/libraries/SplitV2.sol";
+import "../lib/splits-contracts-monorepo/packages/splits-v2/src/splitters/SplitFactoryV2.sol";
 
 contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
     using Address for address payable;
