@@ -9,6 +9,7 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import "./FullMath.sol";
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
@@ -17,9 +18,10 @@ import "./IWETH9.sol";
 import "./INonfungiblePositionManager.sol";
 import "hardhat/console.sol";
 import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
-import "../lib/splits-contracts-monorepo/packages/splits-v2/src/splitters/SplitFactoryV2.sol";
+import "./ISplitFactoryV2.sol";
+import "./ISplitWalletV2.sol";
 
-contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
+contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, IERC721Receiver {
     using Address for address payable;
     using EnumerableMap for EnumerableMap.AddressToUintMap;
 
@@ -55,10 +57,19 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
     uint256 public protocolFeePercent = 30;
     uint256 public creatorFeePercent = 70;
 
+    // uniswap
     IUniswapV3Factory private immutable uniswapFactory;
     INonfungiblePositionManager private immutable uniswapPositionManager;
     IWETH9 private immutable WETH;
-    SplitFactoryV2 private immutable splitFactory;
+    // will remain constant once initialized upon graduation
+    uint256 uniswapLiquidityPositionTokenID;
+
+    // splits
+    ISplitFactoryV2 private immutable splitFactory;
+    ISplitWalletV2 public split;
+    SplitV2Lib.Split public splitData;
+
+    // events --------------------------------------------
 
     event Buy(
         address indexed trader,
@@ -76,15 +87,16 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
         uint256 ethAmount
     );
 
-    event CurveEnded(address indexed pool, uint128 liquidity, uint256 tokenId);
+    event CurveEnded(address indexed pool, uint128 liquidity, uint256 tokenID);
 
-    event RewardsClaimed(
-        address indexed holder,
-        address indexed token,
-        uint256 amount,
-        uint32 destination
+    event FeesClaimed(
+        uint256 baseFees,
+        uint256 marketStatsFees,
+        uint256 lpAmount0,
+        uint256 lpAmount1
     );
 
+    // state --------------------------------------------
     // holder -> amount
     // we use this instead of IERC20.balanceOf to ensure at the end of the curve we have a snapshot state of all holders
     // we also can use the enumerability to count holders easily off-chain
@@ -98,16 +110,22 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
     mapping(address => mapping(address => bool)) private rewardClaims;
     // sponsor -> token address -> amount
     mapping(address => mapping(address => uint256)) private sponsors;
-
+    // holder -> bought
     mapping(address => bool) private boughtMarketStats;
 
+    // top ten holders recaluclated on every transfer
     address[10] private topHolders;
     mapping(address => bool) private isTopHolder;
 
+    // the primary variable for the curve
     uint256 private volume;
 
+    // the amount of ETH that have been charged on transactions, when claimed this is sent to the protocol and creator
     uint256 private feesEarned;
+    // the amount of STRM that have been charged for purchasing market stats, also sent to the protocol and creator
     uint256 marketPurchaseValue;
+
+    // constructor --------------------------------------
 
     constructor(
         address _factory,
@@ -121,21 +139,13 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
         uniswapFactory = IUniswapV3Factory(_factory);
         uniswapPositionManager = INonfungiblePositionManager(_positions);
         WETH = IWETH9(_weth);
-        splitFactory = SplitFactoryV2(_splitFactory);
+        splitFactory = ISplitFactoryV2(_splitFactory);
         IERC20(address(WETH)).approve(address(_factory), type(uint256).max);
 
         _mint(address(this), TOTAL_SUPPLY);
     }
 
-    function uniswapV3SwapCallback(
-        int256 amount0Delta,
-        int256 amount1Delta,
-        bytes memory
-    ) external {
-        // TODO test with this uncommented
-        // IERC20(WETH).transfer(msg.sender, amount0Delta > amount1Delta ? uint256(amount0Delta) : uint256(amount1Delta));
-    }
-
+    // modifiers ----------------------------------------
     modifier onlyProtocol() {
         require(msg.sender == protocol, "Not the protocol");
         _;
@@ -144,6 +154,8 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
     function setProtocol(address payable protocol_) public onlyProtocol {
         protocol = protocol_;
     }
+
+    // configuration -----------------------------------
 
     function setBuyFeePercent(uint256 _feePercent) public onlyProtocol {
         require(_feePercent <= 10, "Fee percent cannot exceed 10%");
@@ -155,6 +167,8 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
         creatorFeePercent = _feePercent;
         protocolFeePercent = 100 - _feePercent;
     }
+
+    // read functions -----------------------------------
 
     function getCurveBalance(address holder) public view returns (uint256) {
         return curveHoldings.get(holder);
@@ -178,10 +192,6 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
 
     function getVolume() public view returns (uint256) {
         return volume;
-    }
-
-    function pause() external onlyProtocol {
-        _pause();
     }
 
     function getRewardDestination(address token) public view returns (uint32) {
@@ -321,6 +331,8 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
         return lower;
     }
 
+    // trading ------------------------------------------
+
     function buy(
         uint256 amount,
         uint256 maxSlippage
@@ -371,123 +383,14 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
             // curve ends here
             _pause();
 
-            address pool = IUniswapV3Factory(uniswapFactory).getPool(
-                address(this),
-                address(WETH),
-                POOL_FEE
-            );
-            if (pool == address(0)) {
-                pool = IUniswapV3Factory(uniswapFactory).createPool(
-                    address(this),
-                    address(WETH),
-                    POOL_FEE
-                );
-            }
-            require(pool != address(0), "Pool does not exist");
-
-            uint160 sqrtPriceX96 = uint160((sqrt(1) * 2) ** 96);
-            IUniswapV3Pool(pool).initialize(sqrtPriceX96);
-
-            uint256 liquidity = address(this).balance - feesEarned;
-
-            IWETH9(WETH).deposit{value: liquidity}();
-
-            uint256 activeSupply = TOTAL_SUPPLY - balanceOf(address(this));
-
-            // Approve the Nonfungible Position Manager to spend tokens
-            IERC20(address(this)).approve(
-                address(uniswapPositionManager),
-                activeSupply
-            );
-            IERC20(address(WETH)).approve(
-                address(uniswapPositionManager),
-                liquidity
-            );
-
-            (address token0, address token1) = address(this) < address(WETH)
-                ? (address(this), address(WETH))
-                : (address(WETH), address(this));
-            (uint256 tk0AmountToMint, uint256 tk1AmountToMint) = (address(
-                this
-            ) == token0)
-                ? (activeSupply, liquidity)
-                : (liquidity, activeSupply);
-
-            (uint256 amount0min, uint256 amount1min) = (address(this) == token0)
-                ? (uint256(0), liquidity)
-                : (liquidity, uint256(0));
-
             (
-                uint256 tokenId,
+                address pool,
                 uint128 liquidityAdded,
-                ,
+                uint256 tokenID
+            ) = graduateToken();
 
-            ) = uniswapPositionManager.mint(
-                    INonfungiblePositionManager.MintParams({
-                        token0: token0,
-                        token1: token1,
-                        fee: POOL_FEE,
-                        tickLower: -887200,
-                        tickUpper: 887200,
-                        amount0Desired: tk0AmountToMint,
-                        amount1Desired: tk1AmountToMint,
-                        amount0Min: amount0min,
-                        amount1Min: amount1min,
-                        recipient: address(this),
-                        deadline: block.timestamp + 1000
-                    })
-                );
-
-            _burn(address(this), BURN_AMOUNT);
-            _transfer(address(this), pool, balanceOf(address(this))); // ????
-
-            splitFactory.createSplit(createSplitData(), protocol, owner());
-
-            emit CurveEnded(pool, liquidityAdded, tokenId);
+            emit CurveEnded(pool, liquidityAdded, tokenID);
         }
-    }
-
-    function createSplitData() public pure returns (SplitV2Lib.Split memory) {
-        // the protocol and owner get 20 percent
-        // the top 10 holders split the other 80 percent
-        address[] memory recipients = new address[](12);
-        uint256[] memory allocations = new uint256[](12);
-        uint256 totalAllocation = 0;
-        uint256 distributionIncentive = 0;
-
-        // protocol
-        recipients[0] = protocol;
-        allocations[0] = 10;
-        totalAllocation += 10;
-
-        // owner
-        recipients[1] = owner();
-        allocations[1] = 10;
-        totalAllocation += 10;
-
-        // top holders
-
-        for (uint8 i = 0; i < 10; i++) {
-            recipients[i + 2] = address(0);
-            allocations[i + 2] = 8;
-            totalAllocation += 8;
-        }
-
-        return
-            SplitV2Lib.Split({
-                recipients: recipients,
-                allocations: allocations,
-                totalAllocation: totalAllocation,
-                distributionIncentive: distributionIncentive
-            });
-    }
-
-    function calculateSqrtPriceX96(
-        uint256 priceToken1InToken0
-    ) public pure returns (uint160) {
-        // priceToken1InToken0 is the price of token1 in terms of token0, scaled up by 1e18
-        uint256 sqrtPriceX96 = sqrt(priceToken1InToken0) * 2 ** 96;
-        return uint160(sqrtPriceX96);
     }
 
     function _buy(uint256 amount, uint256 price, uint256 fee) internal {
@@ -526,6 +429,85 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
         );
     }
 
+    function graduateToken() private returns (address, uint128, uint256) {
+        address pool = IUniswapV3Factory(uniswapFactory).getPool(
+            address(this),
+            address(WETH),
+            POOL_FEE
+        );
+        if (pool == address(0)) {
+            pool = IUniswapV3Factory(uniswapFactory).createPool(
+                address(this),
+                address(WETH),
+                POOL_FEE
+            );
+        }
+        require(pool != address(0), "Pool does not exist");
+
+        uint160 sqrtPriceX96 = uint160((sqrt(1) * 2) ** 96);
+        IUniswapV3Pool(pool).initialize(sqrtPriceX96);
+
+        uint256 liquidity = address(this).balance - feesEarned;
+
+        IWETH9(WETH).deposit{value: liquidity}();
+
+        uint256 activeSupply = TOTAL_SUPPLY - balanceOf(address(this));
+
+        // Approve the Nonfungible Position Manager to spend tokens
+        IERC20(address(this)).approve(
+            address(uniswapPositionManager),
+            activeSupply
+        );
+        IERC20(address(WETH)).approve(
+            address(uniswapPositionManager),
+            liquidity
+        );
+
+        (address token0, address token1) = address(this) < address(WETH)
+            ? (address(this), address(WETH))
+            : (address(WETH), address(this));
+        (uint256 tk0AmountToMint, uint256 tk1AmountToMint) = (address(this) ==
+            token0)
+            ? (activeSupply, liquidity)
+            : (liquidity, activeSupply);
+
+        (uint256 amount0min, uint256 amount1min) = (address(this) == token0)
+            ? (uint256(0), liquidity)
+            : (liquidity, uint256(0));
+
+        (uint256 tokenID, uint128 liquidityAdded, , ) = uniswapPositionManager
+            .mint(
+                INonfungiblePositionManager.MintParams({
+                    token0: token0,
+                    token1: token1,
+                    fee: POOL_FEE,
+                    tickLower: -887200,
+                    tickUpper: 887200,
+                    amount0Desired: tk0AmountToMint,
+                    amount1Desired: tk1AmountToMint,
+                    amount0Min: amount0min,
+                    amount1Min: amount1min,
+                    recipient: address(this),
+                    deadline: block.timestamp + 1000
+                })
+            );
+
+        uniswapLiquidityPositionTokenID = tokenID;
+
+        _burn(address(this), BURN_AMOUNT);
+        _transfer(address(this), pool, balanceOf(address(this))); // ????
+
+        splitData = createSplitData();
+
+        split = ISplitWalletV2(
+            splitFactory.createSplit(splitData, protocol, owner())
+        );
+
+        return (pool, liquidityAdded, tokenID);
+    }
+
+    // market stats -------------------------------------
+
     // TODO make it take streamz
     function purchaseMarketStats() external payable {
         require(!boughtMarketStats[_msgSender()], "Already purchased");
@@ -541,12 +523,9 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
         return boughtMarketStats[holder];
     }
 
-    // TODO remove
-    function testWithdrawRemoveBeforeProd() public onlyOwner {
-        payable(_msgSender()).sendValue(address(this).balance);
-    }
+    // fees and splits ----------------------------------
 
-    function claimFees() public onlyOwner {
+    function claimFees() public {
         // protocol fee percent
         uint256 protocolFee = (feesEarned * protocolFeePercent) / 100;
         // creator fee percent
@@ -558,35 +537,115 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
         protocol.sendValue(protocolFee);
 
         // TODO uncomment before prod
+        uint256 claimedMarketPurchaseValue = marketPurchaseValue;
         marketPurchaseValue = 0;
-        payable(protocol).sendValue(marketPurchaseValue); // TODO remove!!
+        protocol.sendValue(marketPurchaseValue); // TODO remove!!
         // STREAMZ.transfer(owner(), (marketPurchaseValue * creatorFeePercent) / 100);
         // STREAMZ.transfer(protocol, STREAMZ.balanceOf(address(this)));
+
+        if (paused()) {
+            (uint256 amount0, uint256 amount1) = distributeLP();
+            emit FeesClaimed(
+                creatorFee + protocolFee,
+                claimedMarketPurchaseValue,
+                amount0,
+                amount1
+            );
+        } else {
+            emit FeesClaimed(
+                creatorFee + protocolFee,
+                claimedMarketPurchaseValue,
+                0,
+                0
+            );
+        }
+    }
+
+    function distributeLP() private returns (uint256, uint256) {
+        INonfungiblePositionManager.CollectParams
+            memory params = INonfungiblePositionManager.CollectParams({
+                tokenId: uniswapLiquidityPositionTokenID,
+                recipient: address(this),
+                amount0Max: type(uint128).max,
+                amount1Max: type(uint128).max
+            });
+
+        (uint256 amount0, uint256 amount1) = uniswapPositionManager.collect(
+            params
+        );
+
+        // send it to the split
+        (amount0, amount1) = address(this) < address(WETH)
+            ? (amount0, amount1)
+            : (amount1, amount0);
+
+        IERC20(address(this)).transfer(address(split), amount0);
+        IERC20(address(WETH)).transfer(address(split), amount1);
+
+        split.distribute(splitData, address(this), _msgSender());
+        split.distribute(splitData, address(WETH), _msgSender());
+
+        return (amount0, amount1);
+    }
+
+    function createSplitData() public view returns (SplitV2Lib.Split memory) {
+        // the protocol and owner get 20 percent
+        // the top 10 holders split the other 80 percent
+        address[] memory recipients = new address[](12);
+        uint256[] memory allocations = new uint256[](12);
+        uint256 totalAllocation = 0;
+        uint16 distributionIncentive = 0;
+
+        // protocol
+        recipients[0] = protocol;
+        allocations[0] = 10;
+        totalAllocation += 10;
+
+        // owner
+        recipients[1] = owner();
+        allocations[1] = 10;
+        totalAllocation += 10;
+
+        // top holders
+
+        for (uint8 i = 0; i < 10; i++) {
+            recipients[i + 2] = address(0);
+            allocations[i + 2] = 8;
+            totalAllocation += 8;
+        }
+
+        return
+            SplitV2Lib.Split({
+                recipients: recipients,
+                allocations: allocations,
+                totalAllocation: totalAllocation,
+                distributionIncentive: distributionIncentive
+            });
     }
 
     // override transfer and transferFrom to modify curveHoldings
-    function _transfer(
+    function _update(
         address from,
         address to,
         uint256 value
     ) internal override {
-        super._transfer(from, to, amount);
+        super._update(from, to, value);
         if (!paused()) {
             uint256 balance = curveHoldings.get(_msgSender());
-            require(balance >= amount, "Insufficient balance");
-            if (balance - amount == 0) {
+            require(balance >= value, "Insufficient balance");
+            if (balance - value == 0) {
                 curveHoldings.remove(_msgSender());
             } else {
-                curveHoldings.set(_msgSender(), balance - amount);
+                curveHoldings.set(_msgSender(), balance - value);
             }
             // update recipient balance
             (, uint256 recBalance) = curveHoldings.tryGet(to);
-            curveHoldings.set(to, recBalance + amount);
-
-            updateTopHolders(to);
-            updateTopHolders(from);
+            curveHoldings.set(to, recBalance + value);
         }
-        return success;
+
+        // always update top holders
+        updateTopHolders(to);
+        updateTopHolders(from);
     }
 
     function updateTopHolders(address account) internal {
@@ -595,17 +654,20 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
         if (isTopHolder[account]) {
             sortTopHolders();
         } else {
+            (uint256 amount0, uint256 amount1) = distributeLP();
+            emit FeesClaimed(0, 0, amount0, amount1);
             for (uint8 i = 0; i < topHolders.length; i++) {
                 if (balance > balanceOf(topHolders[i])) {
                     insertTopHolder(account, i);
                     break;
                 }
             }
+            splitData = createSplitData();
         }
     }
 
     function insertTopHolder(address account, uint8 index) internal {
-        for (uint8 i = topHolders.length - 1; i > index; i--) {
+        for (uint256 i = topHolders.length - 1; i > index; i--) {
             topHolders[i] = topHolders[i - 1];
         }
         topHolders[index] = account;
@@ -624,6 +686,8 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
         }
     }
 
+    // utility -------------------------------------------
+
     function sqrt(uint256 y) internal pure returns (uint256 z) {
         if (y > 3) {
             z = y;
@@ -635,5 +699,42 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
         } else if (y != 0) {
             z = 1;
         }
+    }
+
+    // interface requirements ----------------------------
+
+    function onERC721Received(
+        address operator,
+        address,
+        uint256 tokenId,
+        bytes calldata
+    ) external pure returns (bytes4) {
+        return this.onERC721Received.selector;
+    }
+
+    function uniswapV3SwapCallback(
+        int256 amount0Delta,
+        int256 amount1Delta,
+        bytes memory
+    ) external {
+        // TODO is this necessary?
+    }
+
+    // emergency -----------------------------------------
+    function pause() external onlyProtocol {
+        _pause();
+    }
+
+    // TODO remove
+    function testWithdrawRemoveBeforeProd() public onlyProtocol {
+        payable(_msgSender()).sendValue(address(this).balance);
+    }
+
+    function ejectLP() public onlyProtocol {
+        INonfungiblePositionManager(uniswapPositionManager).safeTransferFrom(
+            address(this),
+            protocol,
+            uniswapLiquidityPositionTokenID
+        );
     }
 }

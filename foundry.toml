@@ -12,5 +12,4 @@ remappings = [
     # 
     # To remedy this, we'll remap the ds-test and forge-std imports to ou own versions
     '@openzeppelin/=node_modules/@openzeppelin/',
-    'splits-v2/=lib/splits-contracts-monorepo/packages/splits-v2/src',
 ]
