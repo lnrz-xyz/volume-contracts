@@ -51,7 +51,8 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, IERC721Receiver {
     // pool fee tier (1%)
     uint24 public constant POOL_FEE = 10000;
     // the fee percent for buying tokens
-    uint256 public buyFeePercent = 10;
+    uint256 public buyFeePercent = 5;
+    uint256 public graduationFeePercent = 5;
 
     // how much of the fees go to the protocol vs the creator
     uint256 public protocolFeePercent = 30;
@@ -114,7 +115,7 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, IERC721Receiver {
     mapping(address => bool) private boughtMarketStats;
 
     // top ten holders recaluclated on every transfer
-    address[10] private topHolders;
+    address[10] public topHolders;
     mapping(address => bool) private isTopHolder;
 
     // the primary variable for the curve
@@ -166,6 +167,11 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, IERC721Receiver {
         require(_feePercent <= 100, "Fee percent cannot exceed 100%");
         creatorFeePercent = _feePercent;
         protocolFeePercent = 100 - _feePercent;
+    }
+
+    function setGraduationFeePercent(uint256 _feePercent) public onlyProtocol {
+        require(_feePercent <= 10, "Fee percent cannot exceed 10%");
+        graduationFeePercent = _feePercent;
     }
 
     // read functions -----------------------------------
@@ -449,6 +455,11 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, IERC721Receiver {
 
         uint256 liquidity = address(this).balance - feesEarned;
 
+        // take out the fee for graduation
+        uint256 graduationFee = (liquidity * graduationFeePercent) / 100;
+        protocol.sendValue(graduationFee);
+        liquidity -= graduationFee;
+
         IWETH9(WETH).deposit{value: liquidity}();
 
         uint256 activeSupply = TOTAL_SUPPLY - balanceOf(address(this));
@@ -643,7 +654,6 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, IERC721Receiver {
             curveHoldings.set(to, recBalance + value);
         }
 
-        // always update top holders
         updateTopHolders(to);
         updateTopHolders(from);
     }
@@ -667,20 +677,29 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, IERC721Receiver {
     }
 
     function insertTopHolder(address account, uint8 index) internal {
+        // Shift holders down from the end of the list to make space at the index
         for (uint256 i = topHolders.length - 1; i > index; i--) {
             topHolders[i] = topHolders[i - 1];
         }
         topHolders[index] = account;
         isTopHolder[account] = true;
+
+        // If the list now has more than 10 holders, remove the last one
+        if (topHolders[topHolders.length - 1] != address(0)) {
+            isTopHolder[topHolders[topHolders.length - 1]] = false;
+            topHolders[topHolders.length - 1] = address(0);
+        }
     }
 
     function sortTopHolders() internal {
-        for (uint8 i = 0; i < topHolders.length; i++) {
-            for (uint8 j = i + 1; j < topHolders.length; j++) {
-                if (balanceOf(topHolders[j]) > balanceOf(topHolders[i])) {
-                    address temp = topHolders[i];
-                    topHolders[i] = topHolders[j];
-                    topHolders[j] = temp;
+        // A simple sorting algorithm like bubble sort could work here due to the small array size.
+        for (uint256 i = 0; i < topHolders.length - 1; i++) {
+            for (uint256 j = 0; j < topHolders.length - 1 - i; j++) {
+                if (balanceOf(topHolders[j]) < balanceOf(topHolders[j + 1])) {
+                    // Swap the addresses
+                    address temp = topHolders[j];
+                    topHolders[j] = topHolders[j + 1];
+                    topHolders[j + 1] = temp;
                 }
             }
         }
