@@ -16,17 +16,16 @@ import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "./IWETH9.sol";
 import "./INonfungiblePositionManager.sol";
 import "hardhat/console.sol";
-import { UD60x18, ud } from "@prb/math/src/UD60x18.sol";
-import { OApp, Origin, MessagingFee } from "@layerzerolabs/lz-evm-oapp-v2/contracts/oapp/OApp.sol";
-import { OptionsBuilder } from "@layerzerolabs/lz-evm-oapp-v2/contracts/oapp/libs/OptionsBuilder.sol";
+import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
 
-contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
-    using OptionsBuilder for bytes;
+contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable {
     using Address for address payable;
     using EnumerableMap for EnumerableMap.AddressToUintMap;
 
-    address payable private protocol = payable(0x49D4de8Fc7fD8FceEf03AA5b7b191189bFbB637b);
-    IERC20 private constant STREAMZ = IERC20(0x499A12387357e3eC8FAcc011A2AB662e8aBdBd8f);
+    address payable private protocol =
+        payable(0x49D4de8Fc7fD8FceEf03AA5b7b191189bFbB637b);
+    IERC20 private constant STREAMZ =
+        IERC20(0x499A12387357e3eC8FAcc011A2AB662e8aBdBd8f);
 
     // total erc20 supply
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 1e18;
@@ -59,13 +58,30 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     INonfungiblePositionManager private immutable uniswapPositionManager;
     IWETH9 private immutable WETH;
 
-    event Buy(address indexed trader, uint256 newSupply, uint256 newBuyPrice, uint256 amount, uint256 ethAmount);
+    event Buy(
+        address indexed trader,
+        uint256 newSupply,
+        uint256 newBuyPrice,
+        uint256 amount,
+        uint256 ethAmount
+    );
 
-    event Sell(address indexed trader, uint256 newSupply, uint256 newBuyPrice, uint256 amount, uint256 ethAmount);
+    event Sell(
+        address indexed trader,
+        uint256 newSupply,
+        uint256 newBuyPrice,
+        uint256 amount,
+        uint256 ethAmount
+    );
 
     event CurveEnded(address indexed pool, uint128 liquidity, uint256 tokenId);
 
-    event RewardsClaimed(address indexed holder, address indexed token, uint256 amount, uint32 destination);
+    event RewardsClaimed(
+        address indexed holder,
+        address indexed token,
+        uint256 amount,
+        uint32 destination
+    );
 
     // holder -> amount
     // we use this instead of IERC20.balanceOf to ensure at the end of the curve we have a snapshot state of all holders
@@ -83,6 +99,9 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
     mapping(address => bool) private boughtMarketStats;
 
+    address[10] private topHolders;
+    mapping(address => bool) private isTopHolder;
+
     uint256 private volume;
 
     uint256 private feesEarned;
@@ -93,16 +112,9 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         address _positions,
         address _weth,
         string memory name,
-        string memory symbol,
-        address endpoint
-    )
-        payable
-        Ownable(msg.sender)
-        ERC20(name, symbol)
-        ERC20Permit(name)
-        OApp(endpoint, 0x49D4de8Fc7fD8FceEf03AA5b7b191189bFbB637b)
-    {
-        require(msg.value == 0.001 ether, "Incorrect deployment fee");
+        string memory symbol
+    ) payable Ownable(msg.sender) ERC20(name, symbol) ERC20Permit(name) {
+        require(msg.value == 0.0004 ether, "Incorrect deployment fee");
         uniswapFactory = IUniswapV3Factory(_factory);
         uniswapPositionManager = INonfungiblePositionManager(_positions);
         WETH = IWETH9(_weth);
@@ -111,7 +123,11 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         _mint(address(this), TOTAL_SUPPLY);
     }
 
-    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes memory) external {
+    function uniswapV3SwapCallback(
+        int256 amount0Delta,
+        int256 amount1Delta,
+        bytes memory
+    ) external {
         // TODO test with this uncommented
         // IERC20(WETH).transfer(msg.sender, amount0Delta > amount1Delta ? uint256(amount0Delta) : uint256(amount1Delta));
     }
@@ -176,7 +192,10 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         return rewards.get(token);
     }
 
-    function getRewardIsClaimed(address holder, address token) public view returns (bool) {
+    function getRewardIsClaimed(
+        address holder,
+        address token
+    ) public view returns (bool) {
         return rewardClaims[holder][token];
     }
 
@@ -188,7 +207,11 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         UD60x18 currentSupply = ud(getTokensHeldInCurve());
         UD60x18 newSupply = ud(getTokensHeldInCurve()).add(ud(amount));
 
-        return ud(K).mul(newSupply.powu(2).sub(currentSupply.powu(2))).div(ud(2e18)).unwrap();
+        return
+            ud(K)
+                .mul(newSupply.powu(2).sub(currentSupply.powu(2)))
+                .div(ud(2e18))
+                .unwrap();
     }
 
     function getSellPrice(uint256 amount) public view returns (uint256) {
@@ -199,10 +222,17 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         UD60x18 currentSupply = ud(getTokensHeldInCurve());
         UD60x18 newSupply = ud(getTokensHeldInCurve()).sub(ud(amount));
 
-        return ud(K).mul(currentSupply.powu(2).sub(newSupply.powu(2))).div(ud(2e18)).unwrap();
+        return
+            ud(K)
+                .mul(currentSupply.powu(2).sub(newSupply.powu(2)))
+                .div(ud(2e18))
+                .unwrap();
     }
 
-    function getAmountByETHSell(uint256 eth, uint256 maxSlippage) external view returns (uint256) {
+    function getAmountByETHSell(
+        uint256 eth,
+        uint256 maxSlippage
+    ) external view returns (uint256) {
         uint256 lower = 0;
         uint256 upper = getTokensHeldInCurve();
         // initial range estimation
@@ -236,13 +266,17 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         }
         uint256 finalPrice = getSellPrice(lower - 1);
         require(
-            finalPrice <= receivedEther && (receivedEther - finalPrice) * 100 <= maxSlippage * finalPrice,
+            finalPrice <= receivedEther &&
+                (receivedEther - finalPrice) * 100 <= maxSlippage * finalPrice,
             "Slippage too high"
         );
         return lower;
     }
 
-    function getAmountByETHBuy(uint256 eth, uint256 maxSlippage) external view returns (uint256) {
+    function getAmountByETHBuy(
+        uint256 eth,
+        uint256 maxSlippage
+    ) external view returns (uint256) {
         uint256 lower = 0;
         uint256 upper = 1;
         while (getBuyPrice(upper) < eth) {
@@ -276,16 +310,23 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         uint256 finalPrice = getBuyPrice(lower - 1);
         console.log("Final Price: %d (%d)", finalPrice, paidEther);
         require(
-            finalPrice <= paidEther && (paidEther - finalPrice) * 100 <= maxSlippage * finalPrice,
+            finalPrice <= paidEther &&
+                (paidEther - finalPrice) * 100 <= maxSlippage * finalPrice,
             "Slippage too high"
         );
         return lower;
     }
 
-    function buy(uint256 amount, uint256 maxSlippage) external payable whenNotPaused {
+    function buy(
+        uint256 amount,
+        uint256 maxSlippage
+    ) external payable whenNotPaused {
         require(amount > 0, "Amount must be greater than 0");
         if (_msgSender() == owner()) {
-            require(balanceOf(_msgSender()) + amount <= CREATOR_MAX_BUY, "Amount exceeds max buy for creator");
+            require(
+                balanceOf(_msgSender()) + amount <= CREATOR_MAX_BUY,
+                "Amount exceeds max buy for creator"
+            );
         }
 
         uint256 price = getBuyPrice(amount);
@@ -307,7 +348,10 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
                 amount < 10 ? 0 : amount / 10,
                 amount * 4
             );
-            require(actualAmount > 0, "Not enough input to buy the minimum amount of tokens");
+            require(
+                actualAmount > 0,
+                "Not enough input to buy the minimum amount of tokens"
+            );
             price = getBuyPrice(actualAmount);
             fee = (price * buyFeePercent) / 100;
             uint256 refund = msg.value - price - fee;
@@ -323,9 +367,17 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
             // curve ends here
             _pause();
 
-            address pool = IUniswapV3Factory(uniswapFactory).getPool(address(this), address(WETH), POOL_FEE);
+            address pool = IUniswapV3Factory(uniswapFactory).getPool(
+                address(this),
+                address(WETH),
+                POOL_FEE
+            );
             if (pool == address(0)) {
-                pool = IUniswapV3Factory(uniswapFactory).createPool(address(this), address(WETH), POOL_FEE);
+                pool = IUniswapV3Factory(uniswapFactory).createPool(
+                    address(this),
+                    address(WETH),
+                    POOL_FEE
+                );
             }
             require(pool != address(0), "Pool does not exist");
 
@@ -334,18 +386,26 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
             uint256 liquidity = address(this).balance - feesEarned;
 
-            IWETH9(WETH).deposit{ value: liquidity }();
+            IWETH9(WETH).deposit{value: liquidity}();
 
             uint256 activeSupply = TOTAL_SUPPLY - balanceOf(address(this));
 
             // Approve the Nonfungible Position Manager to spend tokens
-            IERC20(address(this)).approve(address(uniswapPositionManager), activeSupply);
-            IERC20(address(WETH)).approve(address(uniswapPositionManager), liquidity);
+            IERC20(address(this)).approve(
+                address(uniswapPositionManager),
+                activeSupply
+            );
+            IERC20(address(WETH)).approve(
+                address(uniswapPositionManager),
+                liquidity
+            );
 
             (address token0, address token1) = address(this) < address(WETH)
                 ? (address(this), address(WETH))
                 : (address(WETH), address(this));
-            (uint256 tk0AmountToMint, uint256 tk1AmountToMint) = (address(this) == token0)
+            (uint256 tk0AmountToMint, uint256 tk1AmountToMint) = (address(
+                this
+            ) == token0)
                 ? (activeSupply, liquidity)
                 : (liquidity, activeSupply);
 
@@ -353,21 +413,26 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
                 ? (uint256(0), liquidity)
                 : (liquidity, uint256(0));
 
-            (uint256 tokenId, uint128 liquidityAdded, , ) = uniswapPositionManager.mint(
-                INonfungiblePositionManager.MintParams({
-                    token0: token0,
-                    token1: token1,
-                    fee: POOL_FEE,
-                    tickLower: -887200,
-                    tickUpper: 887200,
-                    amount0Desired: tk0AmountToMint,
-                    amount1Desired: tk1AmountToMint,
-                    amount0Min: amount0min,
-                    amount1Min: amount1min,
-                    recipient: protocol,
-                    deadline: block.timestamp + 1000
-                })
-            );
+            (
+                uint256 tokenId,
+                uint128 liquidityAdded,
+                ,
+
+            ) = uniswapPositionManager.mint(
+                    INonfungiblePositionManager.MintParams({
+                        token0: token0,
+                        token1: token1,
+                        fee: POOL_FEE,
+                        tickLower: -887200,
+                        tickUpper: 887200,
+                        amount0Desired: tk0AmountToMint,
+                        amount1Desired: tk1AmountToMint,
+                        amount0Min: amount0min,
+                        amount1Min: amount1min,
+                        recipient: protocol,
+                        deadline: block.timestamp + 1000
+                    })
+                );
 
             _burn(address(this), BURN_AMOUNT);
             _transfer(address(this), pool, balanceOf(address(this))); // ????
@@ -376,35 +441,32 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
         }
     }
 
-    function calculateSqrtPriceX96(uint256 priceToken1InToken0) public pure returns (uint160) {
+    function calculateSqrtPriceX96(
+        uint256 priceToken1InToken0
+    ) public pure returns (uint160) {
         // priceToken1InToken0 is the price of token1 in terms of token0, scaled up by 1e18
         uint256 sqrtPriceX96 = sqrt(priceToken1InToken0) * 2 ** 96;
         return uint160(sqrtPriceX96);
     }
 
     function _buy(uint256 amount, uint256 price, uint256 fee) internal {
-        (, uint256 cur) = curveHoldings.tryGet(_msgSender());
-        curveHoldings.set(_msgSender(), cur + amount);
-
         // TODO do fees earned or just transfer to protocol and creator?
         feesEarned += fee;
         volume += msg.value;
 
         _transfer(address(this), _msgSender(), amount);
-        emit Buy(_msgSender(), getTokensHeldInCurve(), getBuyPrice(1e18), amount, price);
+        emit Buy(
+            _msgSender(),
+            getTokensHeldInCurve(),
+            getBuyPrice(1e18),
+            amount,
+            price
+        );
     }
 
     // maybe add slippage and desired sale price to sell, or a separate function for this
     function sell(uint256 amount) external whenNotPaused {
         require(amount > 0, "Amount must be greater than 0");
-
-        uint256 balance = curveHoldings.get(_msgSender());
-        require(balance >= amount, "Insufficient balance");
-        if (balance - amount == 0) {
-            curveHoldings.remove(_msgSender());
-        } else {
-            curveHoldings.set(_msgSender(), balance - amount);
-        }
 
         uint256 price = getSellPrice(amount);
 
@@ -414,7 +476,13 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
 
         _transfer(_msgSender(), address(this), amount);
 
-        emit Sell(_msgSender(), getTokensHeldInCurve(), getBuyPrice(1e18), amount, price);
+        emit Sell(
+            _msgSender(),
+            getTokensHeldInCurve(),
+            getBuyPrice(1e18),
+            amount,
+            price
+        );
     }
 
     // TODO make it take streamz
@@ -456,7 +524,12 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
     }
 
     // override transfer and transferFrom to modify curveHoldings
-    function transfer(address recipient, uint256 amount) public override returns (bool) {
+    function _transfer(
+        address from,
+        address to,
+        uint256 value
+    ) internal override {
+        super._transfer(from, to, amount);
         if (!paused()) {
             uint256 balance = curveHoldings.get(_msgSender());
             require(balance >= amount, "Insufficient balance");
@@ -466,39 +539,48 @@ contract VolumeToken is ERC20, ERC20Permit, Ownable, Pausable, OApp {
                 curveHoldings.set(_msgSender(), balance - amount);
             }
             // update recipient balance
-            (, uint256 recBalance) = curveHoldings.tryGet(recipient);
-            curveHoldings.set(recipient, recBalance + amount);
+            (, uint256 recBalance) = curveHoldings.tryGet(to);
+            curveHoldings.set(to, recBalance + amount);
+
+            updateTopHolders(to);
+            updateTopHolders(from);
         }
-        return super.transfer(recipient, amount);
+        return success;
     }
 
-    function transferFrom(address sender, address recipient, uint256 amount) public override returns (bool) {
-        if (!paused()) {
-            uint256 balance = curveHoldings.get(sender);
-            require(balance >= amount, "Insufficient balance");
-            if (balance - amount == 0) {
-                curveHoldings.remove(sender);
-            } else {
-                curveHoldings.set(sender, balance - amount);
+    function updateTopHolders(address account) internal {
+        uint256 balance = balanceOf(account);
+
+        if (isTopHolder[account]) {
+            sortTopHolders();
+        } else {
+            for (uint8 i = 0; i < topHolders.length; i++) {
+                if (balance > balanceOf(topHolders[i])) {
+                    insertTopHolder(account, i);
+                    break;
+                }
             }
-            // update recipient balance
-            (, uint256 recBalance) = curveHoldings.tryGet(recipient);
-            curveHoldings.set(recipient, recBalance + amount);
         }
-        return super.transferFrom(sender, recipient, amount);
     }
 
-    // this will be called when a reward is added on another chain and is used to update the rewards mapping to account for the rewards
-    function _lzReceive(
-        Origin calldata /*_origin*/,
-        bytes32 /*_guid*/,
-        bytes calldata payload,
-        address /*_executor*/,
-        bytes calldata /*_extraData*/
-    ) internal override {
-        (uint32 destEid, address token, uint256 amount) = abi.decode(payload, (uint32, address, uint256));
-        rewards.set(token, amount);
-        rewardDestinations[token] = destEid;
+    function insertTopHolder(address account, uint8 index) internal {
+        for (uint8 i = topHolders.length - 1; i > index; i--) {
+            topHolders[i] = topHolders[i - 1];
+        }
+        topHolders[index] = account;
+        isTopHolder[account] = true;
+    }
+
+    function sortTopHolders() internal {
+        for (uint8 i = 0; i < topHolders.length; i++) {
+            for (uint8 j = i + 1; j < topHolders.length; j++) {
+                if (balanceOf(topHolders[j]) > balanceOf(topHolders[i])) {
+                    address temp = topHolders[i];
+                    topHolders[i] = topHolders[j];
+                    topHolders[j] = temp;
+                }
+            }
+        }
     }
 
     function sqrt(uint256 y) internal pure returns (uint256 z) {

@@ -8,7 +8,10 @@ async function main() {
         process.env.UNISWAP_POSITIONS,
         process.env.WETH,
         'Volume',
-        'ART'
+        'ART',
+        {
+            value: ethers.utils.parseEther('0.0004'),
+        }
     );
 
     console.log('Contract deployed to address:', contract.target);
