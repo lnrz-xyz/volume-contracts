@@ -18,17 +18,14 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
 
     // Constants
     uint256 private constant TOTAL_SUPPLY = 1_000_000_000 * 1e18;
-    uint256 private constant K = (4 * 1e18) / (400_000_000 ** 2);
-    uint256 private constant CREATOR_MAX_BUY = 10_000_000_000 * 1e18; // TODO update before prod
+    // uint256 private constant K = (1 * 1e18) / (200_000_000 ** 2);
+    UD60x18 private immutable K;
+    uint256 private constant CREATOR_MAX_BUY = 50_000_000 * 1e18;
 
     uint256 public immutable liquidityPoolVolumeThreshold;
 
     // Storage variables
-    uint256 public marketStatsPrice;
-    uint256 public buyFeePercent;
-    uint256 public graduationFeePercent;
-    uint256 public protocolFeePercent;
-    uint256 public creatorFeePercent;
+
     uint256 public uniswapLiquidityPositionTokenID;
     ISplitWalletV2 public split;
     SplitV2Lib.Split public splitData;
@@ -65,13 +62,9 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
         string memory name,
         string memory symbol
     ) payable Ownable(msg.sender) ERC20(name, symbol) {
-        marketStatsPrice = 40000;
-        buyFeePercent = 5;
-        graduationFeePercent = 5;
-        protocolFeePercent = 30;
-        creatorFeePercent = 70;
         config = VolumeConfiguration(_config);
         liquidityPoolVolumeThreshold = config.liquidityPoolVolumeThreshold();
+        K = ud(4 ether).div(ud(800_000_000 * 800_000_000));
 
         _mint(address(this), TOTAL_SUPPLY);
     }
@@ -97,7 +90,7 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
         UD60x18 newSupply = ud(getTokensHeldInCurve()).add(ud(amount));
 
         return
-            ud(K)
+            K
                 .mul(newSupply.powu(2).sub(currentSupply.powu(2)))
                 .div(ud(2e18))
                 .unwrap();
@@ -112,7 +105,7 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
         UD60x18 newSupply = ud(getTokensHeldInCurve()).sub(ud(amount));
 
         return
-            ud(K)
+            K
                 .mul(currentSupply.powu(2).sub(newSupply.powu(2)))
                 .div(ud(2e18))
                 .unwrap();
@@ -158,11 +151,14 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
             ? getBuyPrice(lower - 1)
             : getSellPrice(lower - 1);
 
-        require(
-            finalPrice <= etherAmount &&
-                (etherAmount - finalPrice) * 100 <= maxSlippage * finalPrice,
-            "Slippage too high"
-        );
+        if (maxSlippage > 0) {
+            require(
+                finalPrice <= etherAmount &&
+                    (etherAmount - finalPrice) * 100 <=
+                    maxSlippage * finalPrice,
+                "Slippage too high"
+            );
+        }
         return lower;
     }
 
@@ -195,7 +191,7 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
         }
 
         uint256 price = getBuyPrice(amount);
-        uint256 fee = (price * buyFeePercent) / 100;
+        uint256 fee = (price * config.buyFeePercent()) / 100;
         uint256 totalCost = price + fee;
 
         uint256 actualAmount;
@@ -207,7 +203,7 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
         } else {
             actualAmount = findTokenAmount(
                 true,
-                msg.value - (msg.value * buyFeePercent) / 100,
+                msg.value - (msg.value * config.buyFeePercent()) / 100,
                 maxSlippage,
                 amount < 10 ? 0 : amount / 10,
                 amount * 4
@@ -217,7 +213,7 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
                 "Not enough input to buy the minimum amount of tokens"
             );
             price = getBuyPrice(actualAmount);
-            fee = (price * buyFeePercent) / 100;
+            fee = (price * config.buyFeePercent()) / 100;
             refund = msg.value - price - fee;
         }
 
@@ -251,11 +247,11 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
             price
         );
     }
-
-    function sell(uint256 amount) external whenNotPaused {
+    function sell(uint256 amount, uint256 minAmountOut) external whenNotPaused {
         require(amount > 0, "Amount must be greater than 0");
 
         uint256 price = getSellPrice(amount);
+        require(price >= minAmountOut, "Slippage tolerance exceeded");
 
         _transfer(msg.sender, address(this), amount);
         payable(msg.sender).sendValue(price);
@@ -311,7 +307,8 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
 
     function _prepareGraduationLiquidity() private returns (uint256) {
         uint256 liquidity = address(this).balance - feesEarned;
-        uint256 graduationFee = (liquidity * graduationFeePercent) / 100;
+        uint256 graduationFee = (liquidity * config.graduationFeePercent()) /
+            100;
         payable(config.owner()).sendValue(graduationFee);
         liquidity -= graduationFee;
         IWETH9(config.weth()).deposit{value: liquidity}();
@@ -392,7 +389,7 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
         boughtMarketStats[msg.sender] = true;
 
         // TODO remove before prod (take eth in the mean time)
-        require(msg.value == marketStatsPrice, "Insufficient payment");
+        require(msg.value == config.marketStatsPrice(), "Insufficient payment");
         marketPurchaseValue += msg.value;
 
         // TODO uncomment before prod
@@ -407,9 +404,9 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
 
     function claimFees() public {
         // protocol fee percent
-        uint256 protocolFee = (feesEarned * protocolFeePercent) / 100;
+        uint256 protocolFee = (feesEarned * config.protocolFeePercent()) / 100;
         // creator fee percent
-        uint256 creatorFee = (feesEarned * creatorFeePercent) / 100;
+        uint256 creatorFee = (feesEarned * config.creatorFeePercent()) / 100;
 
         feesEarned -= creatorFee + protocolFee;
 

@@ -1,29 +1,39 @@
 /* eslint-disable no-undef */
-const { parseEther, formatEther } = require('ethers');
 
 async function main() {
-    const contract = await ethers.getContractAt('VolumeToken', '0xe1EcF1DbffFDd67105b5D48B64fc2c7dfed348B9');
+  const contract = await ethers.getContractAt(
+    "VolumeToken",
+    "0xC9F2BF2ed936a1743e62b7997FeBAc5EfD8e851e"
+  )
 
-    const buyPrice = await contract.getBuyPrice(parseEther('2100000'));
-    console.log('BuyPrice: ', formatEther(buyPrice));
+  const buyPrice = await contract.getBuyPrice(
+    ethers.utils.parseEther("500000000")
+  )
+  console.log("BuyPrice: ", ethers.utils.formatEther(buyPrice))
 
-    const tx = await contract.buy(parseEther('2100000'), 100, {
-        value: buyPrice,
-    });
+  const buyAmount = await contract.getAmountByETHBuy(
+    ethers.utils.parseEther("0.1"),
+    0
+  )
+  console.log("BuyAmount: ", ethers.utils.formatEther(buyAmount))
 
-    console.log('Tx: ', tx.hash);
+  // const tx = await contract.buy(parseEther('2100000'), 100, {
+  //     value: buyPrice,
+  // });
 
-    const res = await tx.wait();
-    console.log('Res: ', res);
+  // console.log('Tx: ', tx.hash);
 
-    // const finalTx = await contract.createAndMintLiquidity()
+  // const res = await tx.wait();
+  // console.log('Res: ', res);
 
-    // console.log("FinalTx: ", finalTx.hash)
+  // const finalTx = await contract.createAndMintLiquidity()
+
+  // console.log("FinalTx: ", finalTx.hash)
 }
 
 main()
-    .then(() => process.exit(0))
-    .catch((error) => {
-        console.error(error);
-        process.exit(1);
-    });
+  .then(() => process.exit(0))
+  .catch(error => {
+    console.error(error)
+    process.exit(1)
+  })

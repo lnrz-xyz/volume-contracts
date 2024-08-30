@@ -10,7 +10,7 @@ async function main() {
     process.env.SPLITS_FACTORY
   )
 
-  console.log("Contract deployed to address:", contract.target)
+  console.log("Contract deployed to address:", contract.address)
 }
 
 main()
