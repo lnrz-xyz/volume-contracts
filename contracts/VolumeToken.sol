@@ -45,9 +45,12 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
         uint256 newSupply,
         uint256 newBuyPrice,
         uint256 amount,
-        uint256 ethAmount
+        uint256 ethAmount,
+        bool isBuy
     );
+
     event CurveEnded(address indexed pool, uint128 liquidity, uint256 tokenID);
+
     event FeesClaimed(
         uint256 baseFees,
         uint256 marketStatsFees,
@@ -244,7 +247,8 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
             getTokensHeldInCurve(),
             getBuyPrice(1e18),
             amount,
-            price
+            price,
+            true
         );
     }
     function sell(uint256 amount, uint256 minAmountOut) external whenNotPaused {
@@ -263,7 +267,8 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
             getTokensHeldInCurve(),
             getBuyPrice(1e18),
             amount,
-            price
+            price,
+            false
         );
     }
 
