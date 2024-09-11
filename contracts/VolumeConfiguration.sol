@@ -37,7 +37,7 @@ contract VolumeConfiguration is Ownable {
         creatorFeePercent = 70;
         marketStatsPrice = 40000;
         poolFeePercent = 10000; // 1% as per the original contract
-        liquidityPoolVolumeThreshold = 1 ether; // As per the original contract
+        liquidityPoolVolumeThreshold = 0.5 ether; // As per the original contract
 
         uniswapFactory = IUniswapV3Factory(_uniswapFactory);
         uniswapPositionManager = INonfungiblePositionManager(

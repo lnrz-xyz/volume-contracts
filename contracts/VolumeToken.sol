@@ -10,17 +10,23 @@ import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
 import "./VolumeConfiguration.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
+contract VolumeToken is
+    ERC20,
+    Ownable,
+    Pausable,
+    IERC721Receiver,
+    ReentrancyGuard
+{
     using Address for address payable;
 
     VolumeConfiguration private immutable config;
 
     // Constants
     uint256 private constant TOTAL_SUPPLY = 1_000_000_000 * 1e18;
-    // uint256 private constant K = (1 * 1e18) / (200_000_000 ** 2);
     UD60x18 private immutable K;
-    uint256 private constant CREATOR_MAX_BUY = 50_000_000 * 1e18;
+    uint256 private immutable CREATOR_MAX_BUY;
 
     uint256 public immutable liquidityPoolVolumeThreshold;
 
@@ -33,6 +39,7 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
     mapping(address => mapping(address => uint256)) private sponsors;
     mapping(address => bool) private boughtMarketStats;
     address[10] public topHolders;
+    mapping(address => uint256) public topHolderHoldings;
     mapping(address => bool) private isTopHolder;
 
     uint256 public volume;
@@ -67,7 +74,10 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
     ) payable Ownable(msg.sender) ERC20(name, symbol) {
         config = VolumeConfiguration(_config);
         liquidityPoolVolumeThreshold = config.liquidityPoolVolumeThreshold();
-        K = ud(4 ether).div(ud(800_000_000 * 800_000_000));
+
+        K = ud(liquidityPoolVolumeThreshold).div(ud(800_000_000 * 1e18));
+        // creator max buy is 10% of the supply
+        CREATOR_MAX_BUY = TOTAL_SUPPLY / 10;
 
         _mint(address(this), TOTAL_SUPPLY);
     }
@@ -90,28 +100,20 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
         }
 
         UD60x18 currentSupply = ud(getTokensHeldInCurve());
-        UD60x18 newSupply = ud(getTokensHeldInCurve()).add(ud(amount));
+        UD60x18 newSupply = currentSupply.add(ud(amount));
 
-        return
-            K
-                .mul(newSupply.powu(2).sub(currentSupply.powu(2)))
-                .div(ud(2e18))
-                .unwrap();
+        return K.mul(newSupply.sub(currentSupply)).unwrap();
     }
 
     function getSellPrice(uint256 amount) public view returns (uint256) {
         if (amount == 0) {
-            return 0;
+            return getSellPrice(balanceOf(msg.sender));
         }
 
         UD60x18 currentSupply = ud(getTokensHeldInCurve());
-        UD60x18 newSupply = ud(getTokensHeldInCurve()).sub(ud(amount));
+        UD60x18 newSupply = currentSupply.sub(ud(amount));
 
-        return
-            K
-                .mul(currentSupply.powu(2).sub(newSupply.powu(2)))
-                .div(ud(2e18))
-                .unwrap();
+        return K.mul(currentSupply.sub(newSupply)).unwrap();
     }
 
     function getAmountByETHSell(
@@ -184,7 +186,7 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
     function buy(
         uint256 amount,
         uint256 maxSlippage
-    ) public payable whenNotPaused {
+    ) public payable whenNotPaused nonReentrant {
         require(amount > 0, "Amount must be greater than 0");
         if (msg.sender == owner()) {
             require(
@@ -251,25 +253,74 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
             true
         );
     }
-    function sell(uint256 amount, uint256 minAmountOut) external whenNotPaused {
-        require(amount > 0, "Amount must be greater than 0");
+    function sell(
+        uint256 amount,
+        uint256 minAmountOut
+    ) external whenNotPaused nonReentrant {
+        uint256 sellAmount = amount == 0 ? balanceOf(msg.sender) : amount;
+        uint256 price = getSellPrice(sellAmount);
 
-        uint256 price = getSellPrice(amount);
+        // Check if this sale would cross the threshold
+        if (volume + price >= liquidityPoolVolumeThreshold) {
+            // Calculate the maximum amount that can be sold without crossing the threshold
+            uint256 maxSellAmount = findMaxSellAmount(sellAmount);
+            require(
+                maxSellAmount > 0,
+                "Cannot sell any tokens without crossing threshold"
+            );
+
+            sellAmount = balanceOf(msg.sender) > maxSellAmount + 1
+                ? maxSellAmount + 1
+                : balanceOf(msg.sender);
+            price = getSellPrice(sellAmount);
+        }
+
         require(price >= minAmountOut, "Slippage tolerance exceeded");
 
-        _transfer(msg.sender, address(this), amount);
+        _transfer(msg.sender, address(this), sellAmount);
         payable(msg.sender).sendValue(price);
 
         volume += price;
+
+        if (volume >= liquidityPoolVolumeThreshold) {
+            _pause();
+            (
+                address pool,
+                uint128 liquidityAdded,
+                uint256 tokenID
+            ) = graduateToken();
+            emit CurveEnded(pool, liquidityAdded, tokenID);
+        }
 
         emit Trade(
             msg.sender,
             getTokensHeldInCurve(),
             getBuyPrice(1e18),
-            amount,
+            sellAmount,
             price,
             false
         );
+    }
+
+    function findMaxSellAmount(
+        uint256 initialAmount
+    ) internal view returns (uint256) {
+        uint256 lower = 0;
+        uint256 upper = initialAmount;
+        uint256 target = liquidityPoolVolumeThreshold - volume;
+
+        while (lower < upper) {
+            uint256 mid = (lower + upper + 1) / 2;
+            uint256 price = getSellPrice(mid);
+
+            if (price <= target) {
+                lower = mid;
+            } else {
+                upper = mid - 1;
+            }
+        }
+
+        return lower;
     }
 
     function graduateToken() private returns (address, uint128, uint256) {
@@ -407,7 +458,7 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
 
     // fees and splits ----------------------------------
 
-    function claimFees() public {
+    function claimFees() public nonReentrant {
         // protocol fee percent
         uint256 protocolFee = (feesEarned * config.protocolFeePercent()) / 100;
         // creator fee percent
@@ -521,26 +572,62 @@ contract VolumeToken is ERC20, Ownable, Pausable, IERC721Receiver {
 
     function updateTopHolders(address account) internal {
         uint256 balance = balanceOf(account);
-        uint256 lowestTopHolderBalance = type(uint256).max;
-        uint8 lowestIndex = 0;
 
-        for (uint8 i = 0; i < topHolders.length; i++) {
-            if (topHolders[i] == address(0)) {
-                topHolders[i] = account;
-                isTopHolder[account] = true;
-                return;
-            }
-            uint256 holderBalance = balanceOf(topHolders[i]);
-            if (holderBalance < lowestTopHolderBalance) {
-                lowestTopHolderBalance = holderBalance;
-                lowestIndex = i;
+        // Update or remove the account from topHolderHoldings
+        if (balance > 0) {
+            topHolderHoldings[account] = balance;
+        } else {
+            delete topHolderHoldings[account];
+        }
+
+        // Rebuild the top holders list
+        address[10] memory newTopHolders;
+        uint256[10] memory newTopHolderBalances;
+        uint8 count = 0;
+
+        // First, add the current account if it qualifies
+        if (balance > 0) {
+            newTopHolders[0] = account;
+            newTopHolderBalances[0] = balance;
+            count = 1;
+        }
+
+        // Then, go through existing top holders
+        for (uint8 i = 0; i < 10 && count < 10; i++) {
+            address holder = topHolders[i];
+            if (holder != address(0) && holder != account) {
+                uint256 holderBalance = balanceOf(holder);
+                if (holderBalance > 0) {
+                    // Insert the holder in the correct position
+                    uint8 j = count;
+                    while (
+                        j > 0 && holderBalance > newTopHolderBalances[j - 1]
+                    ) {
+                        newTopHolders[j] = newTopHolders[j - 1];
+                        newTopHolderBalances[j] = newTopHolderBalances[j - 1];
+                        j--;
+                    }
+                    newTopHolders[j] = holder;
+                    newTopHolderBalances[j] = holderBalance;
+                    count++;
+                }
             }
         }
 
-        if (balance > lowestTopHolderBalance) {
-            isTopHolder[topHolders[lowestIndex]] = false;
-            topHolders[lowestIndex] = account;
-            isTopHolder[account] = true;
+        // Update the topHolders array and isTopHolder mapping
+        for (uint8 i = 0; i < 10; i++) {
+            address oldHolder = topHolders[i];
+            address newHolder = newTopHolders[i];
+
+            if (oldHolder != newHolder) {
+                if (oldHolder != address(0)) {
+                    isTopHolder[oldHolder] = false;
+                }
+                if (newHolder != address(0)) {
+                    isTopHolder[newHolder] = true;
+                }
+                topHolders[i] = newHolder;
+            }
         }
     }
 

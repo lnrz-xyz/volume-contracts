@@ -41,7 +41,7 @@ contract VolumeFactory is Ownable {
         string memory symbol
     ) external payable returns (address) {
         require(msg.value >= deploymentFee, "Insufficient fee");
-        require(msg.value - deploymentFee <= 0.1 ether, "Max 0.1 ETH");
+        require(msg.value - deploymentFee <= 0.25 ether, "Max 0.25 ETH");
 
         VolumeToken newToken = new VolumeToken(address(config), name, symbol);
 
@@ -57,7 +57,7 @@ contract VolumeFactory is Ownable {
             }
             uint256 price = newToken.getBuyPrice(amount);
             uint256 fee = (price * config.buyFeePercent()) / 100;
-            uint256 totalCost = price + fee + fee; // double fee just to make sure
+            uint256 totalCost = price + fee;
             newToken.buy{value: totalCost}(amount, 0);
             payable(msg.sender).transfer(msg.value - totalCost);
         } else {

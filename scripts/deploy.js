@@ -2,7 +2,7 @@
 async function main() {
   const factory = await ethers.getContractAt(
     "VolumeFactory",
-    "0x3fbB85543dFa58D23e31Cd02759f76A80c6EA8C0"
+    "0x6571Da2e10C9bf60b1DC5C3d6E8F572a93867e59"
   )
 
   const tx = await factory.createVolumeToken("Volume", "ART", {
@@ -12,6 +12,8 @@ async function main() {
   const res = await tx.wait()
 
   console.log("Res: ", res.transactionHash)
+  // print the address of the first log
+  console.log("First log: ", res.logs[0].address)
 }
 
 main()
