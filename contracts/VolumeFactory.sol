@@ -38,12 +38,18 @@ contract VolumeFactory is Ownable {
 
     function createVolumeToken(
         string memory name,
-        string memory symbol
+        string memory symbol,
+        string memory uri
     ) external payable returns (address) {
         require(msg.value >= deploymentFee, "Insufficient fee");
         require(msg.value - deploymentFee <= 0.25 ether, "Max 0.25 ETH");
 
-        VolumeToken newToken = new VolumeToken(address(config), name, symbol);
+        VolumeToken newToken = new VolumeToken(
+            address(config),
+            name,
+            symbol,
+            uri
+        );
 
         accumulatedFees += deploymentFee;
 

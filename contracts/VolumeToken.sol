@@ -39,6 +39,8 @@ contract VolumeToken is
     ISplitWalletV2 public split;
     SplitV2Lib.Split public splitData;
 
+    string private _uri;
+
     mapping(address => mapping(address => uint256)) private sponsors;
     mapping(address => bool) private boughtMarketStats;
     address[10] public topHolders;
@@ -73,7 +75,8 @@ contract VolumeToken is
     constructor(
         address _config,
         string memory name,
-        string memory symbol
+        string memory symbol,
+        string memory uri_
     ) payable Ownable(msg.sender) ERC20(name, symbol) {
         config = VolumeConfiguration(_config);
         liquidityPoolVolumeThreshold = config.liquidityPoolVolumeThreshold();
@@ -81,6 +84,7 @@ contract VolumeToken is
         K = ud(liquidityPoolVolumeThreshold).div(ud(400_000_000 * 1e18));
         // creator max buy is 10% of the supply
         CREATOR_MAX_BUY = TOTAL_SUPPLY / 10;
+        _uri = uri_;
 
         _mint(address(this), TOTAL_SUPPLY);
     }
@@ -91,7 +95,17 @@ contract VolumeToken is
         _;
     }
 
+    // admin --------------------------------------------
+
+    function setURI(string memory uri_) external onlyOwner {
+        _uri = uri_;
+    }
+
     // read functions -----------------------------------
+
+    function uri() public view returns (string memory) {
+        return _uri;
+    }
 
     function getTokensHeldInCurve() public view returns (uint256) {
         return TOTAL_SUPPLY - balanceOf(address(this));
@@ -119,24 +133,8 @@ contract VolumeToken is
         return K.mul(currentSupply.sub(newSupply)).unwrap();
     }
 
-    function getAmountByETHSell(
-        uint256 eth,
-        uint256 maxSlippage
-    ) external view returns (uint256) {
-        uint256 lower = 0;
-        uint256 upper = getTokensHeldInCurve();
-        // initial range estimation
-        while (getSellPrice(upper) < eth) {
-            lower = upper - (upper / 10);
-            upper *= 2;
-        }
-
-        return findTokenAmount(false, eth, maxSlippage, lower, upper);
-    }
-
     // Combined binary search function for buy and sell operations
-    function findTokenAmount(
-        bool isBuy,
+    function findTokenBuyAmount(
         uint256 etherAmount,
         uint256 maxSlippage,
         uint256 lowerBound,
@@ -146,7 +144,7 @@ contract VolumeToken is
         uint256 upper = upperBound;
         while (lower < upper) {
             uint256 mid = lower + (upper - lower) / 2;
-            uint256 price = isBuy ? getBuyPrice(mid) : getSellPrice(mid);
+            uint256 price = getBuyPrice(mid);
             if (price < etherAmount) {
                 lower = mid + 1;
             } else if (price > etherAmount) {
@@ -155,9 +153,7 @@ contract VolumeToken is
                 break;
             }
         }
-        uint256 finalPrice = isBuy
-            ? getBuyPrice(lower - 1)
-            : getSellPrice(lower - 1);
+        uint256 finalPrice = getBuyPrice(lower - 1);
 
         if (maxSlippage > 0) {
             require(
@@ -181,7 +177,7 @@ contract VolumeToken is
             upper *= 2;
         }
 
-        return findTokenAmount(true, eth, maxSlippage, lower, upper);
+        return findTokenBuyAmount(eth, maxSlippage, lower, upper);
     }
 
     // trading ------------------------------------------
@@ -209,8 +205,7 @@ contract VolumeToken is
             actualAmount = amount;
             refund = msg.value - totalCost;
         } else {
-            actualAmount = findTokenAmount(
-                true,
+            actualAmount = findTokenBuyAmount(
                 msg.value - (msg.value * config.buyFeePercent()) / 100,
                 maxSlippage,
                 amount < 10 ? 0 : amount / 10,
@@ -268,9 +263,8 @@ contract VolumeToken is
     ) external whenNotPaused nonReentrant {
         uint256 sellAmount = amount == 0 ? balanceOf(msg.sender) : amount;
         uint256 price = getSellPrice(sellAmount);
-
-        bool willGraduate = volume + price >= liquidityPoolVolumeThreshold;
-
+        volume += price;
+        bool willGraduate = volume >= liquidityPoolVolumeThreshold;
         if (willGraduate) {
             // if the price makes the total liquidity drop below the minimum weth, we will set willGraduate to false
             // we will then change the amount sold to only the amount bringing the liquidity - price to minimum weth
@@ -281,7 +275,7 @@ contract VolumeToken is
                     MINIMUM_WETH -
                     (address(this).balance - feesEarned - price);
                 sellAmount = balanceOf(msg.sender);
-                minAmountOut = price;
+                feesEarned += MINIMUM_WETH;
             }
         }
 
@@ -289,8 +283,6 @@ contract VolumeToken is
 
         _transfer(msg.sender, address(this), sellAmount);
         payable(msg.sender).sendValue(price);
-
-        volume += price;
 
         if (volume >= liquidityPoolVolumeThreshold) {
             _pause();
@@ -455,6 +447,9 @@ contract VolumeToken is
     // fees and splits ----------------------------------
 
     function claimFees() public nonReentrant {
+        if (feesEarned > address(this).balance) {
+            feesEarned = address(this).balance;
+        }
         // protocol fee percent
         uint256 protocolFee = (feesEarned * config.protocolFeePercent()) / 100;
         // creator fee percent

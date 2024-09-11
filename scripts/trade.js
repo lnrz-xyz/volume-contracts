@@ -3,7 +3,7 @@
 async function main() {
   const contract = await ethers.getContractAt(
     "VolumeToken",
-    "0xea952c2af9dddfbf30d7bbbc0845a7c7896f581d"
+    "0x31cdbe2fd4be53aab6be9a037eaff04c128fc20f"
   )
 
   // const buyPrice = await contract.getBuyPrice(
@@ -16,6 +16,9 @@ async function main() {
   //   0
   // )
   // console.log("BuyAmount: ", ethers.utils.formatEther(buyAmount))
+
+  const paused = await contract.paused()
+  console.log("Paused: ", paused)
 
   // // get top holders
   // const topHolders = await contract.topHolders(0)
@@ -62,14 +65,14 @@ async function main() {
   // console.log("Res: ", res)
 
   // now sell with 0n as the input
-  const sellPrice = await contract.getSellPrice(0)
-  console.log("SellPrice: ", ethers.utils.formatEther(sellPrice))
+  // const sellPrice = await contract.getSellPrice(0)
+  // console.log("SellPrice: ", ethers.utils.formatEther(sellPrice))
 
-  const tx2 = await contract.sell(0, 0)
-  console.log("Tx2: ", tx2.hash)
+  // const tx2 = await contract.sell(0, 0)
+  // console.log("Tx2: ", tx2.hash)
 
-  const res2 = await tx2.wait()
-  console.log("Res2: ", res2)
+  // const res2 = await tx2.wait()
+  // console.log("Res2: ", res2)
 }
 
 main()
