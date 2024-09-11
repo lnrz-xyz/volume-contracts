@@ -46,6 +46,10 @@ module.exports = {
     ],
   },
   networks: {
+    "base-mainnet": {
+      url: process.env.RPC_URL_BASE_MAINNET,
+      accounts,
+    },
     "base-testnet": {
       url: process.env.RPC_URL_BASE_TESTNET,
       accounts,

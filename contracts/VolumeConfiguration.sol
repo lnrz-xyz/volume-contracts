@@ -17,6 +17,7 @@ contract VolumeConfiguration is Ownable {
     uint256 public marketStatsPrice;
     uint24 public poolFeePercent;
     uint256 public liquidityPoolVolumeThreshold;
+    uint256 public minimumWETH;
 
     // Uniswap and other external addresses
     IUniswapV3Factory public uniswapFactory;
@@ -36,9 +37,9 @@ contract VolumeConfiguration is Ownable {
         protocolFeePercent = 30;
         creatorFeePercent = 70;
         marketStatsPrice = 40000;
-        poolFeePercent = 10000; // 1% as per the original contract
-        liquidityPoolVolumeThreshold = 0.5 ether; // As per the original contract
-
+        poolFeePercent = 10000;
+        liquidityPoolVolumeThreshold = 3 ether;
+        minimumWETH = 0.1 ether;
         uniswapFactory = IUniswapV3Factory(_uniswapFactory);
         uniswapPositionManager = INonfungiblePositionManager(
             _uniswapPositionManager
@@ -95,5 +96,9 @@ contract VolumeConfiguration is Ownable {
 
     function setSplitFactory(address _splitFactory) external onlyOwner {
         splitFactory = ISplitFactoryV2(_splitFactory);
+    }
+
+    function setMinimumWETH(uint256 _minimumWETH) external onlyOwner {
+        minimumWETH = _minimumWETH;
     }
 }

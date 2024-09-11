@@ -29,9 +29,9 @@ contract VolumeToken is
     uint256 private constant TOTAL_SUPPLY = 1_000_000_000 * 1e18;
     UD60x18 private immutable K;
     uint256 private immutable CREATOR_MAX_BUY;
+    uint256 private immutable MINIMUM_WETH;
 
     uint256 public immutable liquidityPoolVolumeThreshold;
-    uint256 private constant MINIMUM_WETH = 0.1 ether;
 
     // Storage variables
 
@@ -63,12 +63,9 @@ contract VolumeToken is
 
     event CurveEnded(address indexed pool, uint128 liquidity, uint256 tokenID);
 
-    event FeesClaimed(
-        uint256 baseFees,
-        uint256 marketStatsFees,
-        uint256 lpAmount0,
-        uint256 lpAmount1
-    );
+    event FeesClaimed(uint256 baseFees, uint256 marketStatsFees);
+
+    event LPDistributed(uint256 amount0, uint256 amount1);
 
     // constructor --------------------------------------
 
@@ -85,6 +82,7 @@ contract VolumeToken is
         // creator max buy is 10% of the supply
         CREATOR_MAX_BUY = TOTAL_SUPPLY / 10;
         _uri = uri_;
+        MINIMUM_WETH = config.minimumWETH();
 
         _mint(address(this), TOTAL_SUPPLY);
     }
@@ -256,7 +254,7 @@ contract VolumeToken is
             true
         );
     }
-    // TODO maybe dont graduate on sell all of supply
+
     function sell(
         uint256 amount,
         uint256 minAmountOut
@@ -461,32 +459,20 @@ contract VolumeToken is
         payable(config.owner()).sendValue(protocolFee);
 
         uint256 claimedMarketPurchaseValue = marketPurchaseValue;
-        marketPurchaseValue = 0;
-        STREAMZ.transfer(
-            owner(),
-            (marketPurchaseValue * config.creatorFeePercent()) / 100
-        );
-        STREAMZ.transfer(config.owner(), STREAMZ.balanceOf(address(this)));
+        if (claimedMarketPurchaseValue > 0) {
+            marketPurchaseValue = 0;
 
-        if (paused()) {
-            (uint256 amount0, uint256 amount1) = distributeLP();
-            emit FeesClaimed(
-                creatorFee + protocolFee,
-                claimedMarketPurchaseValue,
-                amount0,
-                amount1
+            STREAMZ.transfer(
+                owner(),
+                (marketPurchaseValue * config.creatorFeePercent()) / 100
             );
-        } else {
-            emit FeesClaimed(
-                creatorFee + protocolFee,
-                claimedMarketPurchaseValue,
-                0,
-                0
-            );
+            STREAMZ.transfer(config.owner(), STREAMZ.balanceOf(address(this)));
         }
+
+        emit FeesClaimed(creatorFee + protocolFee, claimedMarketPurchaseValue);
     }
 
-    function distributeLP() private returns (uint256, uint256) {
+    function distributeLP() public nonReentrant returns (uint256, uint256) {
         INonfungiblePositionManager.CollectParams
             memory params = INonfungiblePositionManager.CollectParams({
                 tokenId: uniswapLiquidityPositionTokenID,
@@ -499,50 +485,87 @@ contract VolumeToken is
             .uniswapPositionManager()
             .collect(params);
 
-        // send it to the split
+        // Ensure correct token order
         (amount0, amount1) = address(this) < address(config.weth())
             ? (amount0, amount1)
             : (amount1, amount0);
 
-        IERC20(address(this)).transfer(address(split), amount0);
-        IERC20(address(config.weth())).transfer(address(split), amount1);
+        // Transfer to split contract
+        require(
+            IERC20(address(this)).transfer(address(split), amount0),
+            "Transfer of token0 failed"
+        );
+        require(
+            IERC20(address(config.weth())).transfer(address(split), amount1),
+            "Transfer of token1 failed"
+        );
 
+        // Distribute
         split.distribute(splitData, address(this), msg.sender);
         split.distribute(splitData, address(config.weth()), msg.sender);
+
+        emit LPDistributed(amount0, amount1);
 
         return (amount0, amount1);
     }
 
     function createSplitData() public view returns (SplitV2Lib.Split memory) {
-        // the protocol and owner get 20 percent
-        // the top 10 holders split the other 80 percent
-        address[] memory recipients = new address[](12);
-        uint256[] memory allocations = new uint256[](12);
+        // Maximum number of recipients (protocol, owner, and up to 10 top holders)
+        uint8 maxRecipients = 12;
+        address[] memory recipients = new address[](maxRecipients);
+        uint256[] memory allocations = new uint256[](maxRecipients);
         uint256 totalAllocation = 0;
+        uint8 recipientCount = 0;
         uint16 distributionIncentive = 0;
 
-        // protocol
-        recipients[0] = config.owner();
-        allocations[0] = 10;
-        totalAllocation += 10;
+        // Protocol
+        recipients[recipientCount] = config.owner();
+        allocations[recipientCount] = 20;
+        totalAllocation += 20;
+        recipientCount++;
 
-        // owner
-        recipients[1] = owner();
-        allocations[1] = 10;
-        totalAllocation += 10;
+        // Owner
+        recipients[recipientCount] = owner();
+        allocations[recipientCount] = 30;
+        totalAllocation += 30;
+        recipientCount++;
 
-        // top holders
+        // Top holders
+        uint256 remainingAllocation = 50; // 100 - 20 - 30
+        uint256 allocationPerHolder = 5;
+        for (uint8 i = 0; i < 10 && recipientCount < maxRecipients; i++) {
+            address holder = topHolders[i];
+            if (holder != address(0)) {
+                recipients[recipientCount] = holder;
+                allocations[recipientCount] = allocationPerHolder;
+                totalAllocation += allocationPerHolder;
+                remainingAllocation -= allocationPerHolder;
+                recipientCount++;
+            }
+        }
 
-        for (uint8 i = 0; i < 10; i++) {
-            recipients[i + 2] = address(0);
-            allocations[i + 2] = 8;
-            totalAllocation += 8;
+        // If there are fewer than 10 top holders, distribute remaining allocation
+        if (remainingAllocation > 0 && recipientCount > 2) {
+            uint256 extraAllocation = remainingAllocation /
+                (recipientCount - 2);
+            for (uint8 i = 2; i < recipientCount; i++) {
+                allocations[i] += extraAllocation;
+                totalAllocation += extraAllocation;
+            }
+        }
+
+        // Create final arrays with exact size
+        address[] memory finalRecipients = new address[](recipientCount);
+        uint256[] memory finalAllocations = new uint256[](recipientCount);
+        for (uint8 i = 0; i < recipientCount; i++) {
+            finalRecipients[i] = recipients[i];
+            finalAllocations[i] = allocations[i];
         }
 
         return
             SplitV2Lib.Split({
-                recipients: recipients,
-                allocations: allocations,
+                recipients: finalRecipients,
+                allocations: finalAllocations,
                 totalAllocation: totalAllocation,
                 distributionIncentive: distributionIncentive
             });
@@ -662,11 +685,6 @@ contract VolumeToken is
     // emergency -----------------------------------------
     function pause() external onlyProtocol {
         _pause();
-    }
-
-    // TODO remove before prod
-    function testWithdrawRemoveBeforeProd() public onlyProtocol {
-        payable(msg.sender).sendValue(address(this).balance);
     }
 
     function ejectLP() public onlyProtocol {
