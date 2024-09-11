@@ -22,6 +22,8 @@ contract VolumeToken is
     using Address for address payable;
 
     VolumeConfiguration private immutable config;
+    IERC20 private constant STREAMZ =
+        IERC20(0x499A12387357e3eC8FAcc011A2AB662e8aBdBd8f);
 
     // Constants
     uint256 private constant TOTAL_SUPPLY = 1_000_000_000 * 1e18;
@@ -29,6 +31,7 @@ contract VolumeToken is
     uint256 private immutable CREATOR_MAX_BUY;
 
     uint256 public immutable liquidityPoolVolumeThreshold;
+    uint256 private constant MINIMUM_WETH = 0.1 ether;
 
     // Storage variables
 
@@ -75,7 +78,7 @@ contract VolumeToken is
         config = VolumeConfiguration(_config);
         liquidityPoolVolumeThreshold = config.liquidityPoolVolumeThreshold();
 
-        K = ud(liquidityPoolVolumeThreshold).div(ud(800_000_000 * 1e18));
+        K = ud(liquidityPoolVolumeThreshold).div(ud(400_000_000 * 1e18));
         // creator max buy is 10% of the supply
         CREATOR_MAX_BUY = TOTAL_SUPPLY / 10;
 
@@ -230,12 +233,17 @@ contract VolumeToken is
 
         if (volume >= liquidityPoolVolumeThreshold) {
             _pause();
-            (
-                address pool,
-                uint128 liquidityAdded,
-                uint256 tokenID
-            ) = graduateToken();
-            emit CurveEnded(pool, liquidityAdded, tokenID);
+            if (address(this).balance - feesEarned > MINIMUM_WETH) {
+                (
+                    address pool,
+                    uint128 liquidityAdded,
+                    uint256 tokenID
+                ) = graduateToken();
+                emit CurveEnded(pool, liquidityAdded, tokenID);
+            } else {
+                _burn(address(this), balanceOf(address(this)));
+                emit CurveEnded(address(0), 0, 0);
+            }
         }
     }
 
@@ -253,6 +261,7 @@ contract VolumeToken is
             true
         );
     }
+    // TODO maybe dont graduate on sell all of supply
     function sell(
         uint256 amount,
         uint256 minAmountOut
@@ -260,19 +269,20 @@ contract VolumeToken is
         uint256 sellAmount = amount == 0 ? balanceOf(msg.sender) : amount;
         uint256 price = getSellPrice(sellAmount);
 
-        // Check if this sale would cross the threshold
-        if (volume + price >= liquidityPoolVolumeThreshold) {
-            // Calculate the maximum amount that can be sold without crossing the threshold
-            uint256 maxSellAmount = findMaxSellAmount(sellAmount);
-            require(
-                maxSellAmount > 0,
-                "Cannot sell any tokens without crossing threshold"
-            );
+        bool willGraduate = volume + price >= liquidityPoolVolumeThreshold;
 
-            sellAmount = balanceOf(msg.sender) > maxSellAmount + 1
-                ? maxSellAmount + 1
-                : balanceOf(msg.sender);
-            price = getSellPrice(sellAmount);
+        if (willGraduate) {
+            // if the price makes the total liquidity drop below the minimum weth, we will set willGraduate to false
+            // we will then change the amount sold to only the amount bringing the liquidity - price to minimum weth
+            if (address(this).balance - feesEarned - price < MINIMUM_WETH) {
+                willGraduate = false;
+                // the difference between the current balance and the minimum weth
+                price =
+                    MINIMUM_WETH -
+                    (address(this).balance - feesEarned - price);
+                sellAmount = balanceOf(msg.sender);
+                minAmountOut = price;
+            }
         }
 
         require(price >= minAmountOut, "Slippage tolerance exceeded");
@@ -284,12 +294,17 @@ contract VolumeToken is
 
         if (volume >= liquidityPoolVolumeThreshold) {
             _pause();
-            (
-                address pool,
-                uint128 liquidityAdded,
-                uint256 tokenID
-            ) = graduateToken();
-            emit CurveEnded(pool, liquidityAdded, tokenID);
+            if (willGraduate) {
+                (
+                    address pool,
+                    uint128 liquidityAdded,
+                    uint256 tokenID
+                ) = graduateToken();
+                emit CurveEnded(pool, liquidityAdded, tokenID);
+            } else {
+                _burn(address(this), balanceOf(address(this)));
+                emit CurveEnded(address(0), 0, 0);
+            }
         }
 
         emit Trade(
@@ -302,31 +317,13 @@ contract VolumeToken is
         );
     }
 
-    function findMaxSellAmount(
-        uint256 initialAmount
-    ) internal view returns (uint256) {
-        uint256 lower = 0;
-        uint256 upper = initialAmount;
-        uint256 target = liquidityPoolVolumeThreshold - volume;
-
-        while (lower < upper) {
-            uint256 mid = (lower + upper + 1) / 2;
-            uint256 price = getSellPrice(mid);
-
-            if (price <= target) {
-                lower = mid;
-            } else {
-                upper = mid - 1;
-            }
-        }
-
-        return lower;
-    }
-
     function graduateToken() private returns (address, uint128, uint256) {
         address pool = _createOrGetPool();
         uint256 liquidity = _prepareGraduationLiquidity();
-        uint256 activeSupply = TOTAL_SUPPLY - balanceOf(address(this));
+        uint256 activeSupply = getTokensHeldInCurve();
+        if (activeSupply > balanceOf(address(this))) {
+            activeSupply = balanceOf(address(this));
+        }
 
         _approveTokensForUniswap(activeSupply, liquidity);
 
@@ -440,16 +437,15 @@ contract VolumeToken is
 
     // market stats -------------------------------------
 
-    function purchaseMarketStats() external payable {
+    function purchaseMarketStats() external {
         require(!boughtMarketStats[msg.sender], "Already purchased");
         boughtMarketStats[msg.sender] = true;
 
-        // TODO remove before prod (take eth in the mean time)
-        require(msg.value == config.marketStatsPrice(), "Insufficient payment");
-        marketPurchaseValue += msg.value;
-
-        // TODO uncomment before prod
-        // STREAMZ.transferFrom(msg.sender, address(this), marketStatsPrice);
+        STREAMZ.transferFrom(
+            msg.sender,
+            address(this),
+            config.marketStatsPrice()
+        );
     }
 
     function purchasedMarketStats(address holder) public view returns (bool) {
@@ -471,10 +467,11 @@ contract VolumeToken is
 
         uint256 claimedMarketPurchaseValue = marketPurchaseValue;
         marketPurchaseValue = 0;
-        payable(config.owner()).sendValue(marketPurchaseValue); // TODO remove before prod
-        // TODO uncomment before prod
-        // STREAMZ.transfer(owner(), (marketPurchaseValue * creatorFeePercent) / 100);
-        // STREAMZ.transfer(protocol, STREAMZ.balanceOf(address(this)));
+        STREAMZ.transfer(
+            owner(),
+            (marketPurchaseValue * config.creatorFeePercent()) / 100
+        );
+        STREAMZ.transfer(config.owner(), STREAMZ.balanceOf(address(this)));
 
         if (paused()) {
             (uint256 amount0, uint256 amount1) = distributeLP();
@@ -661,9 +658,7 @@ contract VolumeToken is
         int256 amount0Delta,
         int256 amount1Delta,
         bytes memory
-    ) external {
-        // TODO is this necessary?
-    }
+    ) external {}
 
     // emergency -----------------------------------------
     function pause() external onlyProtocol {
