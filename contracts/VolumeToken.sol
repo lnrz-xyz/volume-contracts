@@ -568,6 +568,10 @@ contract VolumeToken is
     }
 
     function updateTopHolders(address account) internal {
+        if (account == address(0) || account == address(this)) {
+            return;
+        }
+
         uint256 balance = balanceOf(account);
 
         // Update or remove the account from topHolderHoldings
