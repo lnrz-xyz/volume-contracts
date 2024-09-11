@@ -48,7 +48,8 @@ contract VolumeFactory is Ownable {
             address(config),
             name,
             symbol,
-            uri
+            uri,
+            msg.sender
         );
 
         accumulatedFees += deploymentFee;

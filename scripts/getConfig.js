@@ -2,13 +2,12 @@
 async function main() {
   const contract = await ethers.getContractAt(
     "VolumeFactory",
-    "0xD409ca01B35Ba99100469C9Bd600385692A8f030"
+    "0xb5E7674682A89412828b033018e8dBc7D6eCd3DA"
   )
 
   const config = await contract.config()
-  const split = await contract.split()
+
   console.log("Config:", config)
-  console.log("Split:", split)
 }
 
 main()

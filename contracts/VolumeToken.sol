@@ -73,8 +73,9 @@ contract VolumeToken is
         address _config,
         string memory name,
         string memory symbol,
-        string memory uri_
-    ) payable Ownable(msg.sender) ERC20(name, symbol) {
+        string memory uri_,
+        address _owner
+    ) payable Ownable(_owner) ERC20(name, symbol) {
         config = VolumeConfiguration(_config);
         liquidityPoolVolumeThreshold = config.liquidityPoolVolumeThreshold();
 
@@ -445,31 +446,40 @@ contract VolumeToken is
     // fees and splits ----------------------------------
 
     function claimFees() public nonReentrant {
-        if (feesEarned > address(this).balance) {
-            feesEarned = address(this).balance;
+        uint256 availableBalance = address(this).balance;
+        uint256 totalFees = feesEarned;
+
+        if (totalFees > availableBalance) {
+            totalFees = availableBalance;
         }
-        // protocol fee percent
-        uint256 protocolFee = (feesEarned * config.protocolFeePercent()) / 100;
-        // creator fee percent
-        uint256 creatorFee = (feesEarned * config.creatorFeePercent()) / 100;
 
-        feesEarned -= creatorFee + protocolFee;
+        if (totalFees > 0) {
+            uint256 protocolFee = (totalFees * config.protocolFeePercent()) /
+                100;
+            uint256 creatorFee = totalFees - protocolFee;
 
-        payable(owner()).sendValue(creatorFee);
-        payable(config.owner()).sendValue(protocolFee);
+            payable(config.owner()).sendValue(protocolFee);
+            payable(owner()).sendValue(creatorFee);
+
+            feesEarned = 0;
+        }
 
         uint256 claimedMarketPurchaseValue = marketPurchaseValue;
         if (claimedMarketPurchaseValue > 0) {
             marketPurchaseValue = 0;
 
-            STREAMZ.transfer(
-                owner(),
-                (marketPurchaseValue * config.creatorFeePercent()) / 100
-            );
-            STREAMZ.transfer(config.owner(), STREAMZ.balanceOf(address(this)));
+            uint256 streamzBalance = STREAMZ.balanceOf(address(this));
+            uint256 creatorStreamzFee = (claimedMarketPurchaseValue *
+                config.creatorFeePercent()) / 100;
+            uint256 protocolStreamzFee = streamzBalance - creatorStreamzFee;
+
+            if (streamzBalance > 0) {
+                STREAMZ.transfer(owner(), creatorStreamzFee);
+                STREAMZ.transfer(config.owner(), protocolStreamzFee);
+            }
         }
 
-        emit FeesClaimed(creatorFee + protocolFee, claimedMarketPurchaseValue);
+        emit FeesClaimed(totalFees, claimedMarketPurchaseValue);
     }
 
     function distributeLP() public nonReentrant returns (uint256, uint256) {
