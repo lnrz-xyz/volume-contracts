@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
 import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
 import "./VolumeConfiguration.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -186,8 +187,10 @@ contract VolumeToken is
         uint256 maxSlippage
     ) public payable whenNotPaused nonReentrant {
         require(
-            amount > 0 && getTokensHeldInCurve() + amount <= MAX_CURVE_SUPPLY,
-            "Amount must be greater than 0"
+            amount > 0 &&
+                getTokensHeldInCurve() + amount <=
+                TOTAL_SUPPLY - 100_000_000 * 1e18,
+            "Amount must be greater than 0 and cannot exceed the total supply"
         );
         if (msg.sender == owner()) {
             require(
@@ -469,7 +472,9 @@ contract VolumeToken is
         emit FeesClaimed(totalFees, claimedMarketPurchaseValue);
     }
 
-    function distributeLP() public nonReentrant returns (uint256, uint256) {
+    function distributeLP(
+        bool distributeToSplit
+    ) public nonReentrant returns (uint256, uint256) {
         INonfungiblePositionManager.CollectParams
             memory params = INonfungiblePositionManager.CollectParams({
                 tokenId: uniswapLiquidityPositionTokenID,
@@ -487,19 +492,19 @@ contract VolumeToken is
             ? (amount0, amount1)
             : (amount1, amount0);
 
-        // Transfer to split contract
-        require(
-            IERC20(address(this)).transfer(address(split), amount0),
-            "Transfer of token0 failed"
-        );
-        require(
-            IERC20(address(config.weth())).transfer(address(split), amount1),
-            "Transfer of token1 failed"
+        // Transfer to split contract using TransferHelper
+        TransferHelper.safeTransfer(address(this), address(split), amount0);
+        TransferHelper.safeTransfer(
+            address(config.weth()),
+            address(split),
+            amount1
         );
 
-        // Distribute
-        split.distribute(splitData, address(this), msg.sender);
-        split.distribute(splitData, address(config.weth()), msg.sender);
+        if (distributeToSplit) {
+            // Distribute
+            split.distribute(splitData, address(this), msg.sender);
+            split.distribute(splitData, address(config.weth()), msg.sender);
+        }
 
         emit LPDistributed(amount0, amount1);
 

@@ -2,7 +2,7 @@
 async function main() {
   const contract = await ethers.getContractAt(
     "VolumeFactory",
-    "0xb5E7674682A89412828b033018e8dBc7D6eCd3DA"
+    "0xB3E601dE2352BC1E26728886467f552A1210CC95"
   )
 
   const config = await contract.config()
