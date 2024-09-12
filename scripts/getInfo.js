@@ -2,14 +2,16 @@
 async function main() {
   const contract = await ethers.getContractAt(
     "VolumeToken",
-    "0xfd2c11bee1288fb59d8d747ae99d325845ead36e"
+    "0xaba0c86aa3de03bd3f1178e8e3c2b526766332da"
   )
 
-  const split = await contract.split()
-  const owner = await contract.owner()
+  const info = await contract.balanceOf(
+    "0xaba0c86aa3de03bd3f1178e8e3c2b526766332da"
+  )
+  const volume = await contract.volume()
 
-  console.log("Split:", split)
-  console.log("Owner:", owner)
+  console.log("Info:", ethers.utils.formatEther(info))
+  console.log("Volume:", ethers.utils.formatEther(volume))
 }
 
 main()

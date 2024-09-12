@@ -297,6 +297,7 @@ contract VolumeToken is
 
     function graduateToken() private returns (address, uint128, uint256) {
         address pool = _createOrGetPool();
+        _createSplit();
         uint256 liquidity = _prepareGraduationLiquidity();
         uint256 activeSupply = getTokensHeldInCurve();
         if (activeSupply > balanceOf(address(this))) {
@@ -395,7 +396,7 @@ contract VolumeToken is
                     amount1Desired: tk1AmountToMint,
                     amount0Min: amount0min,
                     amount1Min: amount1min,
-                    recipient: address(this),
+                    recipient: address(split),
                     deadline: block.timestamp + 1000
                 })
             );
@@ -403,9 +404,7 @@ contract VolumeToken is
         return (tokenID, liquidityAdded);
     }
 
-    function _finalizeGraduation() private {
-        _burn(address(this), balanceOf(address(this)));
-
+    function _createSplit() private {
         splitData = createSplitData();
         split = ISplitWalletV2(
             config.splitFactory().createSplit(
@@ -414,6 +413,10 @@ contract VolumeToken is
                 owner()
             )
         );
+    }
+
+    function _finalizeGraduation() private {
+        _burn(address(this), balanceOf(address(this)));
     }
 
     // market stats -------------------------------------
@@ -492,6 +495,12 @@ contract VolumeToken is
             ? (amount0, amount1)
             : (amount1, amount0);
 
+        TransferHelper.safeApprove(address(this), address(split), amount0);
+        TransferHelper.safeApprove(
+            address(config.weth()),
+            address(split),
+            amount1
+        );
         // Transfer to split contract using TransferHelper
         TransferHelper.safeTransfer(address(this), address(split), amount0);
         TransferHelper.safeTransfer(

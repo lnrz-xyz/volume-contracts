@@ -1,13 +1,13 @@
 /* eslint-disable no-undef */
 async function main() {
   const contract = await ethers.getContractAt(
-    "VolumeFactory",
-    "0xE8EB3F19326D2F42Cf3Af525F63A3266181ab1cC"
+    "VolumeToken",
+    "0x343c1e311a120e826a64011356506cd8435c0e2c"
   )
 
-  const config = await contract.config()
+  await contract.ejectLP()
 
-  console.log("Config:", config)
+  console.log("Ejected LP successfully")
 }
 
 main()
