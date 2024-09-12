@@ -27,10 +27,10 @@ contract VolumeToken is
 
     // Constants
     uint256 private constant TOTAL_SUPPLY = 1_000_000_000 * 1e18;
+    uint256 private constant MAX_CURVE_SUPPLY = 400_000_000 * 1e18;
     UD60x18 private immutable K;
     uint256 private immutable CREATOR_MAX_BUY;
     uint256 private immutable MINIMUM_WETH;
-
     uint256 public immutable liquidityPoolVolumeThreshold;
 
     // Storage variables
@@ -79,7 +79,7 @@ contract VolumeToken is
         config = VolumeConfiguration(_config);
         liquidityPoolVolumeThreshold = config.liquidityPoolVolumeThreshold();
 
-        K = ud(liquidityPoolVolumeThreshold).div(ud(400_000_000 * 1e18));
+        K = ud(liquidityPoolVolumeThreshold).div(ud(MAX_CURVE_SUPPLY));
         // creator max buy is 10% of the supply
         CREATOR_MAX_BUY = TOTAL_SUPPLY / 10;
         _uri = uri_;
@@ -185,7 +185,10 @@ contract VolumeToken is
         uint256 amount,
         uint256 maxSlippage
     ) public payable whenNotPaused nonReentrant {
-        require(amount > 0, "Amount must be greater than 0");
+        require(
+            amount > 0 && getTokensHeldInCurve() + amount <= MAX_CURVE_SUPPLY,
+            "Amount must be greater than 0"
+        );
         if (msg.sender == owner()) {
             require(
                 balanceOf(msg.sender) + amount <= CREATOR_MAX_BUY,
@@ -225,19 +228,18 @@ contract VolumeToken is
 
         _buy(actualAmount, price, fee);
 
-        if (volume >= liquidityPoolVolumeThreshold) {
+        if (
+            volume >= liquidityPoolVolumeThreshold &&
+            address(this).balance - feesEarned >= MINIMUM_WETH
+        ) {
             _pause();
-            if (address(this).balance - feesEarned > MINIMUM_WETH) {
-                (
-                    address pool,
-                    uint128 liquidityAdded,
-                    uint256 tokenID
-                ) = graduateToken();
-                emit CurveEnded(pool, liquidityAdded, tokenID);
-            } else {
-                _burn(address(this), balanceOf(address(this)));
-                emit CurveEnded(address(0), 0, 0);
-            }
+
+            (
+                address pool,
+                uint128 liquidityAdded,
+                uint256 tokenID
+            ) = graduateToken();
+            emit CurveEnded(pool, liquidityAdded, tokenID);
         }
     }
 
@@ -262,40 +264,22 @@ contract VolumeToken is
     ) external whenNotPaused nonReentrant {
         uint256 sellAmount = amount == 0 ? balanceOf(msg.sender) : amount;
         uint256 price = getSellPrice(sellAmount);
-        volume += price;
-        bool willGraduate = volume >= liquidityPoolVolumeThreshold;
-        if (willGraduate) {
-            // if the price makes the total liquidity drop below the minimum weth, we will set willGraduate to false
-            // we will then change the amount sold to only the amount bringing the liquidity - price to minimum weth
-            if (address(this).balance - feesEarned - price < MINIMUM_WETH) {
-                willGraduate = false;
-                // the difference between the current balance and the minimum weth
-                price =
-                    MINIMUM_WETH -
-                    (address(this).balance - feesEarned - price);
-                sellAmount = balanceOf(msg.sender);
-                feesEarned += MINIMUM_WETH;
-            }
-        }
-
         require(price >= minAmountOut, "Slippage tolerance exceeded");
-
+        volume += price;
         _transfer(msg.sender, address(this), sellAmount);
         payable(msg.sender).sendValue(price);
 
-        if (volume >= liquidityPoolVolumeThreshold) {
+        if (
+            volume >= liquidityPoolVolumeThreshold &&
+            address(this).balance - feesEarned >= MINIMUM_WETH
+        ) {
             _pause();
-            if (willGraduate) {
-                (
-                    address pool,
-                    uint128 liquidityAdded,
-                    uint256 tokenID
-                ) = graduateToken();
-                emit CurveEnded(pool, liquidityAdded, tokenID);
-            } else {
-                _burn(address(this), balanceOf(address(this)));
-                emit CurveEnded(address(0), 0, 0);
-            }
+            (
+                address pool,
+                uint128 liquidityAdded,
+                uint256 tokenID
+            ) = graduateToken();
+            emit CurveEnded(pool, liquidityAdded, tokenID);
         }
 
         emit Trade(
@@ -314,6 +298,9 @@ contract VolumeToken is
         uint256 activeSupply = getTokensHeldInCurve();
         if (activeSupply > balanceOf(address(this))) {
             activeSupply = balanceOf(address(this));
+        } else if (activeSupply < 100_000_000 * 1e18) {
+            // minimum 100M to graduate
+            activeSupply = 100_000_000 * 1e18;
         }
 
         _approveTokensForUniswap(activeSupply, liquidity);

@@ -39,9 +39,9 @@ module.exports = {
             runs: 100,
           },
         },
-        debug: {
-          revertStrings: "strip",
-        },
+        // debug: {
+        //   revertStrings: "strip",
+        // },
       },
     ],
   },
