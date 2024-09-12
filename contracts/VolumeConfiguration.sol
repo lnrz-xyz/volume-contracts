@@ -36,7 +36,7 @@ contract VolumeConfiguration is Ownable {
         graduationFeePercent = 5;
         protocolFeePercent = 30;
         creatorFeePercent = 70;
-        marketStatsPrice = 40000;
+        marketStatsPrice = 40000 * 10 ** 18;
         poolFeePercent = 10000;
         liquidityPoolVolumeThreshold = 3 ether;
         minimumWETH = 0.1 ether;

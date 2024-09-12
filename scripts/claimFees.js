@@ -2,13 +2,13 @@
 async function main() {
   const contract = await ethers.getContractAt(
     "VolumeToken",
-    "0xfd2c11bee1288fb59d8d747ae99d325845ead36e"
+    "0x3189a0e487cbf88879133edd5ffacc42725a1047"
   )
 
-  console.log(
-    "Market Stats Fees: ",
-    ethers.utils.formatEther(await contract.marketPurchaseValue())
-  )
+  // console.log(
+  //   "Market Stats Fees: ",
+  //   ethers.utils.formatEther(await contract.marketPurchaseValue())
+  // )
   console.log(ethers.utils.formatEther(await contract.feesEarned()))
   await contract.claimFees()
 }
