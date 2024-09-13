@@ -1,9 +1,11 @@
 /* eslint-disable no-undef */
 
+const { parseEther } = require("ethers/lib/utils")
+
 async function main() {
   const contract = await ethers.getContractAt(
     "VolumeToken",
-    "0x31cdbe2fd4be53aab6be9a037eaff04c128fc20f"
+    "0x973a47B56cAa47587213a75e327641bF3Af7787B"
   )
 
   // const buyPrice = await contract.getBuyPrice(
@@ -52,14 +54,26 @@ async function main() {
   // const sellPriceMe = await contract.getSellPrice(balanceOfMe)
   // console.log("SellPriceMe: ", ethers.utils.formatEther(sellPriceMe))
 
-  // const buyPrice = await contract.getBuyPrice(ethers.utils.parseEther("1"))
-  // console.log("BuyPrice: ", ethers.utils.formatEther(buyPrice))
+  // const threshold = await contract.liquidityPoolVolumeThreshold()
+  // console.log("Threshold: ", ethers.utils.formatEther(threshold))
 
-  // const tx = await contract.buy(ethers.utils.parseEther("1"), 100, {
-  //   value: buyPrice,
+  // const buyAmount = await contract.getAmountByETHBuy(threshold, 0)
+  // console.log("BuyAmount: ", ethers.utils.formatEther(buyAmount))
+
+  // const tx = await contract.buy(buyAmount, 0, {
+  //   value: threshold,
   // })
 
-  // console.log("Tx: ", tx.hash)
+  const buyAmount = await contract.getAmountByETHBuy(parseEther("0.00011"), 0)
+  console.log("BuyAmount: ", buyAmount)
+
+  const tx = await contract.buy(buyAmount, 0, {
+    value: parseEther("0.00011"),
+  })
+
+  console.log("Tx: ", tx.hash)
+  const res = await tx.wait()
+  console.log("Res: ", res.blockHash)
 
   // const res = await tx.wait()
   // console.log("Res: ", res)

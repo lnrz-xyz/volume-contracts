@@ -321,6 +321,39 @@ contract VolumeToken is
         return (pool, liquidityAdded, tokenID);
     }
 
+    uint256 constant Q96 = 2 ** 96;
+
+    function sqrtPriceX96(
+        uint256 amountToken0,
+        uint256 amountToken1
+    ) private pure returns (uint160) {
+        require(
+            amountToken0 > 0 && amountToken1 > 0,
+            "Amounts must be greater than zero"
+        );
+
+        // Calculate price = amountToken1 / amountToken0
+        uint256 price = (amountToken1 * 1e18) / amountToken0; // Assuming token0 has 18 decimals like ETH
+
+        // Calculate sqrtPriceX96 = sqrt(price) * 2^96
+        uint256 sqrtPrice = sqrt(price);
+        return uint160((sqrtPrice * Q96) / 1e9);
+    }
+
+    // Function to calculate square root
+    function sqrt(uint y) internal pure returns (uint z) {
+        if (y > 3) {
+            z = y;
+            uint x = y / 2 + 1;
+            while (x < z) {
+                z = x;
+                x = (y / x + x) / 2;
+            }
+        } else if (y != 0) {
+            z = 1;
+        }
+    }
+
     function _createOrGetPool() private returns (address) {
         address pool = config.uniswapFactory().getPool(
             address(this),
@@ -333,8 +366,18 @@ contract VolumeToken is
                 address(config.weth()),
                 config.poolFeePercent()
             );
-            uint160 sqrtPriceX96 = uint160((sqrt(1) * 2) ** 96);
-            IUniswapV3Pool(pool).initialize(sqrtPriceX96);
+
+            uint256 tokenAmount = getTokensHeldInCurve();
+            uint256 ethBalance = address(this).balance - feesEarned;
+
+            uint160 p;
+            if (address(this) < address(config.weth())) {
+                p = sqrtPriceX96(tokenAmount, ethBalance);
+            } else {
+                p = sqrtPriceX96(ethBalance, tokenAmount);
+            }
+
+            IUniswapV3Pool(pool).initialize(p);
         }
         require(pool != address(0), "Pool does not exist");
         return pool;
@@ -376,9 +419,6 @@ contract VolumeToken is
             token0
             ? (activeSupply, liquidity)
             : (liquidity, activeSupply);
-        (uint256 amount0min, uint256 amount1min) = address(this) == token0
-            ? (uint256(0), liquidity)
-            : (liquidity, uint256(0));
 
         (
             uint256 tokenID,
@@ -394,9 +434,9 @@ contract VolumeToken is
                     tickUpper: 887200,
                     amount0Desired: tk0AmountToMint,
                     amount1Desired: tk1AmountToMint,
-                    amount0Min: amount0min,
-                    amount1Min: amount1min,
-                    recipient: address(split),
+                    amount0Min: 0,
+                    amount1Min: 0,
+                    recipient: address(this),
                     deadline: block.timestamp + 1000
                 })
             );
@@ -410,7 +450,7 @@ contract VolumeToken is
             config.splitFactory().createSplit(
                 splitData,
                 config.owner(),
-                owner()
+                config.owner()
             )
         );
     }
@@ -481,7 +521,7 @@ contract VolumeToken is
         INonfungiblePositionManager.CollectParams
             memory params = INonfungiblePositionManager.CollectParams({
                 tokenId: uniswapLiquidityPositionTokenID,
-                recipient: address(this),
+                recipient: address(split),
                 amount0Max: type(uint128).max,
                 amount1Max: type(uint128).max
             });
@@ -489,25 +529,6 @@ contract VolumeToken is
         (uint256 amount0, uint256 amount1) = config
             .uniswapPositionManager()
             .collect(params);
-
-        // Ensure correct token order
-        (amount0, amount1) = address(this) < address(config.weth())
-            ? (amount0, amount1)
-            : (amount1, amount0);
-
-        TransferHelper.safeApprove(address(this), address(split), amount0);
-        TransferHelper.safeApprove(
-            address(config.weth()),
-            address(split),
-            amount1
-        );
-        // Transfer to split contract using TransferHelper
-        TransferHelper.safeTransfer(address(this), address(split), amount0);
-        TransferHelper.safeTransfer(
-            address(config.weth()),
-            address(split),
-            amount1
-        );
 
         if (distributeToSplit) {
             // Distribute
@@ -661,21 +682,6 @@ contract VolumeToken is
         }
     }
 
-    // utility -------------------------------------------
-
-    function sqrt(uint256 y) internal pure returns (uint256 z) {
-        if (y > 3) {
-            z = y;
-            uint256 x = y / 2 + 1;
-            while (x < z) {
-                z = x;
-                x = (y / x + x) / 2;
-            }
-        } else if (y != 0) {
-            z = 1;
-        }
-    }
-
     // interface requirements ----------------------------
 
     function onERC721Received(
@@ -704,5 +710,9 @@ contract VolumeToken is
             config.owner(),
             uniswapLiquidityPositionTokenID
         );
+    }
+
+    receive() external payable {
+        feesEarned += msg.value;
     }
 }

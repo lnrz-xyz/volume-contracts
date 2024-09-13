@@ -1,13 +1,14 @@
 /* eslint-disable no-undef */
 async function main() {
   const contract = await ethers.getContractAt(
-    "VolumeFactory",
-    "0x439b9341471E5D8e6b3d33ea7482e6d944DbAac3"
+    "VolumeToken",
+    "0x973a47B56cAa47587213a75e327641bF3Af7787B"
   )
 
-  const config = await contract.config()
+  const split = await contract.split()
+  console.log("Split: ", split)
 
-  console.log("Config:", config)
+  // await contract.distributeLP(true)
 }
 
 main()

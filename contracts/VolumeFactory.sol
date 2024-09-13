@@ -55,19 +55,7 @@ contract VolumeFactory is Ownable {
         accumulatedFees += deploymentFee;
 
         if (msg.value > deploymentFee) {
-            uint256 amount = newToken.getAmountByETHBuy(
-                msg.value - deploymentFee,
-                0
-            );
-            if (amount > 50_000_000 * 1e18) {
-                amount = 50_000_000 * 1e18;
-            }
-            uint256 price = newToken.getBuyPrice(amount);
-            uint256 fee = (price * config.buyFeePercent()) / 100;
-            uint256 totalCost = price + fee;
-            newToken.buy{value: totalCost}(amount, 0);
-            payable(msg.sender).transfer(msg.value - totalCost);
-        } else {
+            // send back the rest
             payable(msg.sender).transfer(msg.value - deploymentFee);
         }
 

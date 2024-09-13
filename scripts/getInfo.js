@@ -2,16 +2,26 @@
 async function main() {
   const contract = await ethers.getContractAt(
     "VolumeToken",
-    "0xaba0c86aa3de03bd3f1178e8e3c2b526766332da"
+    "0x8E4d0F85e71a6e924F51376115FD1B7169beafaD"
   )
 
-  const info = await contract.balanceOf(
-    "0xaba0c86aa3de03bd3f1178e8e3c2b526766332da"
-  )
   const volume = await contract.volume()
+  const curBalance = await contract.balanceOf(
+    "0x8E4d0F85e71a6e924F51376115FD1B7169beafaD"
+  )
 
-  console.log("Info:", ethers.utils.formatEther(info))
+  const amount0ToDistribute = await contract.amount0ToDistribute()
+  const amount1ToDistribute = await contract.amount1ToDistribute()
   console.log("Volume:", ethers.utils.formatEther(volume))
+  console.log("Cur Balance:", ethers.utils.formatEther(curBalance))
+  console.log(
+    "Amount0ToDistribute:",
+    ethers.utils.formatEther(amount0ToDistribute)
+  )
+  console.log(
+    "Amount1ToDistribute:",
+    ethers.utils.formatEther(amount1ToDistribute)
+  )
 }
 
 main()
