@@ -9,7 +9,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
-import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
+import "./ICurveCalculator.sol";
 import "./VolumeConfiguration.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
@@ -21,6 +21,7 @@ contract VolumeToken is
     ReentrancyGuard
 {
     using Address for address payable;
+    address private immutable curveCalculator;
 
     VolumeConfiguration private immutable config;
     IERC20 private constant STREAMZ =
@@ -29,7 +30,7 @@ contract VolumeToken is
     // Constants
     uint256 private constant TOTAL_SUPPLY = 1_000_000_000 * 1e18;
     uint256 private constant MAX_CURVE_SUPPLY = 400_000_000 * 1e18;
-    UD60x18 private immutable K;
+    uint256 private immutable K;
     uint256 private immutable CREATOR_MAX_BUY;
     uint256 private immutable MINIMUM_WETH;
     uint256 public immutable liquidityPoolVolumeThreshold;
@@ -75,12 +76,16 @@ contract VolumeToken is
         string memory name,
         string memory symbol,
         string memory uri_,
-        address _owner
-    ) payable Ownable(_owner) ERC20(name, symbol) {
+        address _owner,
+        address _curveCalculator
+    ) Ownable(_owner) ERC20(name, symbol) {
         config = VolumeConfiguration(_config);
         liquidityPoolVolumeThreshold = config.liquidityPoolVolumeThreshold();
-
-        K = ud(liquidityPoolVolumeThreshold).div(ud(MAX_CURVE_SUPPLY));
+        curveCalculator = _curveCalculator;
+        K = ICurveCalculator(curveCalculator).calculateConstant(
+            liquidityPoolVolumeThreshold,
+            MAX_CURVE_SUPPLY
+        );
         // creator max buy is 10% of the supply
         CREATOR_MAX_BUY = TOTAL_SUPPLY / 10;
         _uri = uri_;
@@ -116,10 +121,8 @@ contract VolumeToken is
             return 0;
         }
 
-        UD60x18 currentSupply = ud(getTokensHeldInCurve());
-        UD60x18 newSupply = currentSupply.add(ud(amount));
-
-        return K.mul(newSupply.sub(currentSupply)).unwrap();
+        ICurveCalculator calculator = ICurveCalculator(curveCalculator);
+        return calculator.getBuyPrice(amount, getTokensHeldInCurve(), K);
     }
 
     function getSellPrice(uint256 amount) public view returns (uint256) {
@@ -127,10 +130,8 @@ contract VolumeToken is
             return getSellPrice(balanceOf(msg.sender));
         }
 
-        UD60x18 currentSupply = ud(getTokensHeldInCurve());
-        UD60x18 newSupply = currentSupply.sub(ud(amount));
-
-        return K.mul(currentSupply.sub(newSupply)).unwrap();
+        ICurveCalculator calculator = ICurveCalculator(curveCalculator);
+        return calculator.getSellPrice(amount, getTokensHeldInCurve(), K);
     }
 
     // Combined binary search function for buy and sell operations

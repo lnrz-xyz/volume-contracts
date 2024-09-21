@@ -2,7 +2,7 @@
 async function main() {
   const factory = await ethers.getContractAt(
     "VolumeFactory",
-    "0x6bBA1744a6dE420f0BAb461d845276fFBe207A94"
+    "0x62364815Ddf88dB883829c003C36B4FE92fE96B7"
   )
 
   const tx = await factory.createVolumeToken(

@@ -7,7 +7,8 @@ async function main() {
     process.env.UNISWAP_FACTORY,
     process.env.UNISWAP_POSITIONS,
     process.env.WETH,
-    process.env.SPLITS_FACTORY
+    process.env.SPLITS_FACTORY,
+    "0x853F3b97215d0CbeB84f5201586f9ff11169524b"
   )
 
   console.log("Contract deployed to address:", contract.address)

@@ -12,6 +12,8 @@ contract VolumeFactory is Ownable {
 
     VolumeConfiguration public immutable config;
 
+    address public curveCalculator;
+
     event VolumeTokenCreated(
         address indexed creator,
         address indexed tokenAddress
@@ -22,7 +24,8 @@ contract VolumeFactory is Ownable {
         address _uniswapFactory,
         address _uniswapPositionManager,
         address _weth,
-        address _splitFactory
+        address _splitFactory,
+        address _curveCalculator
     ) Ownable(msg.sender) {
         deploymentFee = _initialFee;
         feeRecipient = msg.sender;
@@ -34,6 +37,7 @@ contract VolumeFactory is Ownable {
             _weth,
             _splitFactory
         );
+        curveCalculator = _curveCalculator;
     }
 
     function createVolumeToken(
@@ -49,7 +53,8 @@ contract VolumeFactory is Ownable {
             name,
             symbol,
             uri,
-            msg.sender
+            msg.sender,
+            curveCalculator
         );
 
         accumulatedFees += deploymentFee;
@@ -75,5 +80,9 @@ contract VolumeFactory is Ownable {
 
     function updateFeeRecipient(address _newRecipient) external onlyOwner {
         feeRecipient = _newRecipient;
+    }
+
+    function updateCurveCalculator(address _newCalculator) external onlyOwner {
+        curveCalculator = _newCalculator;
     }
 }

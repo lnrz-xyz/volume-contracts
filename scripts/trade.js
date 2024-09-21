@@ -5,7 +5,7 @@ const { parseEther } = require("ethers/lib/utils")
 async function main() {
   const contract = await ethers.getContractAt(
     "VolumeToken",
-    "0x973a47B56cAa47587213a75e327641bF3Af7787B"
+    "0x3304eE0d47C7f01A877F319FB4dd14C158963518"
   )
 
   // const buyPrice = await contract.getBuyPrice(
@@ -64,29 +64,44 @@ async function main() {
   //   value: threshold,
   // })
 
-  const buyAmount = await contract.getAmountByETHBuy(parseEther("0.00011"), 0)
+  const buyAmount = await contract.getAmountByETHBuy(parseEther("0.001"), 0)
   console.log("BuyAmount: ", buyAmount)
 
+  const plusFee = parseEther("0.001").mul(105).div(100)
+  console.log("PlusFee: ", ethers.utils.formatEther(plusFee))
+
   const tx = await contract.buy(buyAmount, 0, {
-    value: parseEther("0.00011"),
+    value: plusFee,
   })
 
   console.log("Tx: ", tx.hash)
-  const res = await tx.wait()
-  console.log("Res: ", res.blockHash)
+  await tx.wait()
 
-  // const res = await tx.wait()
-  // console.log("Res: ", res)
+  // do it again and check the new price
+  const buyPriceOfAmount = await contract.getBuyPrice(buyAmount)
+  console.log("BuyPriceOfAmount: ", ethers.utils.formatEther(buyPriceOfAmount))
 
-  // now sell with 0n as the input
-  // const sellPrice = await contract.getSellPrice(0)
-  // console.log("SellPrice: ", ethers.utils.formatEther(sellPrice))
+  const buyAgainPlusFee = buyPriceOfAmount.mul(105).div(100)
+  console.log("BuyAgainPlusFee: ", ethers.utils.formatEther(buyAgainPlusFee))
 
-  // const tx2 = await contract.sell(0, 0)
-  // console.log("Tx2: ", tx2.hash)
+  const buyAgainTx = await contract.buy(buyAmount, 0, {
+    value: buyAgainPlusFee,
+  })
 
-  // const res2 = await tx2.wait()
-  // console.log("Res2: ", res2)
+  console.log("BuyAgainTx: ", buyAgainTx.hash)
+  await buyAgainTx.wait()
+
+  // see the sell price of new amount it should be higher than the original buy price
+  const sellPriceOfAmount = await contract.getSellPrice(buyAmount)
+  console.log(
+    "SellPriceOfAmount: ",
+    ethers.utils.formatEther(sellPriceOfAmount)
+  )
+
+  // sell the tokens
+  const sellTx = await contract.sell(buyAmount, 0)
+  console.log("SellTx: ", sellTx.hash)
+  await sellTx.wait()
 }
 
 main()
